@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Plus, Trash2, Download, X, ExternalLink, Upload } from 'lucide-react';
+import { Plus, Trash2, Download, X, ExternalLink, Upload, AlertCircle, RefreshCw } from 'lucide-react';
 
-const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const signedMoney = (value) => `${value >= 0 ? '+' : '-'}${money(Math.abs(value))}`;
+const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const signedMoney = (v) => `${v >= 0 ? '+' : '-'}${money(Math.abs(v))}`;
 
 function AddModal({ onClose, onAdd }) {
   const [form, setForm] = useState({ ticker: '', shares: '', avgBuyPrice: '', purchaseDate: '', notes: '' });
@@ -13,17 +13,13 @@ function AddModal({ onClose, onAdd }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await axios.post('/api/portfolio', form);
-      onAdd(res.data);
-      onClose();
+      onAdd(res.data); onClose();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to add holding');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -44,13 +40,15 @@ function AddModal({ onClose, onAdd }) {
               <div key={key}>
                 <label className="label">{label}</label>
                 <input className="input" type={type} placeholder={placeholder}
-                  value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} required={key !== 'purchaseDate'} />
+                  value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  required={key !== 'purchaseDate'} />
               </div>
             ))}
           </div>
           <div style={{ marginTop: 14 }}>
             <label className="label">Notes (optional)</label>
-            <input className="input" placeholder="Long term hold, dividend play..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            <input className="input" placeholder="Long term hold..." value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{error}</div>}
           <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
@@ -69,14 +67,26 @@ export default function Portfolio() {
   const [portfolio, setPortfolio] = useState(null);
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [liveMode, setLiveMode] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
   const load = () => {
-    Promise.all([axios.get('/api/portfolio'), axios.get('/api/recommendations')])
-      .then(([p, r]) => { setPortfolio(p.data); setRecs(r.data.recommendations || []); })
-      .finally(() => setLoading(false));
+    setLoading(true); setError(null);
+    Promise.all([
+      axios.get('/api/portfolio').catch(e => ({ data: null, _err: e })),
+      axios.get('/api/recommendations').catch(() => ({ data: { recommendations: [] } })),
+    ]).then(([p, r]) => {
+      if (p.data) {
+        setPortfolio(p.data);
+        setLiveMode(p.data.holdings?.some(h => h.livePrice) ?? false);
+      } else {
+        setError(p._err?.response?.data?.error || 'Failed to load portfolio. Is the server running?');
+      }
+      setRecs(r.data?.recommendations || []);
+    }).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
@@ -88,52 +98,17 @@ export default function Portfolio() {
   };
 
   const exportCSV = () => {
-    const headers = ['Ticker', 'Name', 'Shares', 'Buy Price', 'Current Price', 'Total Value', 'P&L', 'P&L %', 'RSI', 'MACD', 'EMA20', 'EMA50', 'SMA20', 'SMA50', 'Signal'];
+    if (!portfolio) return;
+    const headers = ['Ticker','Shares','Buy Price','Current Price','Total Value','P&L','P&L %','RSI','MACD','Signal'];
     const rows = portfolio.holdings.map(h => {
       const rec = recs.find(r => r.ticker === h.ticker);
-      return [h.displayTicker || h.ticker, h.name, h.shares, h.avgBuyPrice, h.currentPrice, h.totalValue, h.pnl, `${h.pnlPercent}%`, h.technical?.rsi?.value, h.technical?.macd?.histogram, h.technical?.ema?.ema20, h.technical?.ema?.ema50, h.technical?.sma?.sma20, h.technical?.sma?.sma50, rec?.recommendation || 'N/A'];
+      return [h.displayTicker||h.ticker, h.shares, h.avgBuyPrice, h.currentPrice, h.totalValue, h.pnl, `${h.pnlPercent}%`, h.technical?.rsi?.value?.toFixed(1)||'', h.technical?.macd?.histogram?.toFixed(3)||'', rec?.recommendation||'N/A'];
     });
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     a.download = `portfolio_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
-  };
-
-  const splitCsvLine = (line) => {
-    const values = [];
-    let current = '';
-    let quoted = false;
-    for (const char of line) {
-      if (char === '"') quoted = !quoted;
-      else if (char === ',' && !quoted) {
-        values.push(current.trim());
-        current = '';
-      } else current += char;
-    }
-    values.push(current.trim());
-    return values;
-  };
-
-  const parseImportFile = (text, filename) => {
-    if (filename.toLowerCase().endsWith('.json')) {
-      const parsed = JSON.parse(text);
-      return Array.isArray(parsed) ? parsed : parsed.holdings;
-    }
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    const headers = splitCsvLine(lines[0]).map(h => h.trim().toLowerCase().replace(/[\s_-]/g, ''));
-    return lines.slice(1).map(line => {
-      const values = splitCsvLine(line);
-      const row = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
-      return {
-        ticker: row.ticker || row.symbol || row.nsesymbol,
-        shares: row.shares || row.quantity || row.qty,
-        avgBuyPrice: row.avgbuyprice || row.buyprice || row.averageprice,
-        purchaseDate: row.purchasedate || row.date,
-        notes: row.notes,
-      };
-    });
   };
 
   const handleImport = async (event) => {
@@ -141,19 +116,41 @@ export default function Portfolio() {
     if (!file) return;
     try {
       const text = await file.text();
-      const holdings = parseImportFile(text, file.name);
-      if (!Array.isArray(holdings) || holdings.length === 0) throw new Error('No holdings found');
-      if (!window.confirm(`Import ${holdings.length} holdings? This will replace the current saved portfolio.`)) return;
+      let holdings;
+      if (file.name.toLowerCase().endsWith('.json')) {
+        const parsed = JSON.parse(text);
+        holdings = Array.isArray(parsed) ? parsed : parsed.holdings;
+      } else {
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[\s_-]/g, ''));
+        holdings = lines.slice(1).map(line => {
+          const vals = line.split(',');
+          const row = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim()]));
+          return { ticker: row.ticker||row.symbol, shares: row.shares||row.quantity||row.qty, avgBuyPrice: row.avgbuyprice||row.buyprice||row.averageprice, notes: row.notes };
+        });
+      }
+      if (!Array.isArray(holdings) || holdings.length === 0) throw new Error('No holdings found in file');
+      if (!window.confirm(`Import ${holdings.length} holdings? This will replace your current portfolio.`)) return;
       await axios.post('/api/portfolio/import', { holdings, mode: 'replace' });
       load();
     } catch (err) {
       alert(`Import failed: ${err.message}`);
-    } finally {
-      event.target.value = '';
-    }
+    } finally { event.target.value = ''; }
   };
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--text-muted)' }}>Loading portfolio...</div>;
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', gap: 6 }}>
+      <span className="loading-dot" /><span className="loading-dot" /><span className="loading-dot" />
+    </div>
+  );
+
+  if (error || !portfolio) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh', gap: 16 }}>
+      <AlertCircle size={40} color="var(--red)" />
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{error || 'Failed to load portfolio'}</div>
+      <button className="btn btn-primary" onClick={load}>Retry</button>
+    </div>
+  );
 
   const { summary, holdings } = portfolio;
 
@@ -162,9 +159,13 @@ export default function Portfolio() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>Portfolio</h1>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{holdings.length} positions · Total: {money(summary.totalValue)}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+            {holdings.length} positions · Total: {money(summary.totalValue)}
+            {!liveMode && <span style={{ marginLeft: 10, color: '#f59e0b', fontSize: 11 }}>⚠️ Live prices unavailable — showing cost basis</span>}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-ghost" onClick={load}><RefreshCw size={13} /> Refresh</button>
           <input ref={fileInputRef} type="file" accept=".csv,.json" onChange={handleImport} style={{ display: 'none' }} />
           <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Import CSV/JSON</button>
           <button className="btn btn-ghost" onClick={exportCSV}><Download size={14} /> Export CSV</button>
@@ -189,55 +190,53 @@ export default function Portfolio() {
 
       {/* Table */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Ticker</th><th>Shares</th><th>Buy Price</th><th>Current Price</th>
-              <th>Value</th><th>P&L</th><th>P&L %</th><th>RSI</th><th>MACD</th><th>Signal</th><th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {holdings.map(h => {
-              const rec = recs.find(r => r.ticker === h.ticker);
-              return (
-                <tr key={h.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div>
-                        <div style={{ fontWeight: 700 }}>{h.displayTicker || h.ticker}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{h.sector}</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Ticker</th><th>Shares</th><th>Buy Price</th><th>Current Price</th>
+                <th>Value</th><th>P&L</th><th>P&L %</th><th>RSI</th><th>MACD</th><th>Signal</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {holdings.map(h => {
+                const rec = recs.find(r => r.ticker === h.ticker);
+                return (
+                  <tr key={h.id}>
+                    <td>
+                      <div style={{ fontWeight: 700 }}>{h.displayTicker || h.ticker}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{h.sector || 'EQUITY'}</div>
+                    </td>
+                    <td className="mono">{h.shares.toLocaleString('en-IN')}</td>
+                    <td className="mono">{money(h.avgBuyPrice)}</td>
+                    <td className="mono">
+                      <div>{money(h.currentPrice)}{!h.livePrice && <span style={{ fontSize: 9, color: '#f59e0b', marginLeft: 3 }}>est</span>}</div>
+                      {h.livePrice && <div style={{ fontSize: 11, color: h.dailyChange >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {h.dailyChange >= 0 ? '+' : ''}{h.dailyChangePercent?.toFixed(2)}%
+                      </div>}
+                    </td>
+                    <td className="mono">{money(h.totalValue)}</td>
+                    <td className={`mono ${h.pnl >= 0 ? 'pos' : 'neg'}`}>{signedMoney(h.pnl)}</td>
+                    <td className={`mono ${h.pnlPercent >= 0 ? 'pos' : 'neg'}`}>{h.pnlPercent >= 0 ? '+' : ''}{h.pnlPercent?.toFixed(2)}%</td>
+                    <td className="mono">{h.technical?.rsi?.value?.toFixed(1) || '—'}</td>
+                    <td className={`mono ${(h.technical?.macd?.histogram || 0) >= 0 ? 'pos' : 'neg'}`}>{h.technical?.macd?.histogram?.toFixed(3) || '—'}</td>
+                    <td>{rec ? <span className={`badge badge-${rec.recommendation}`}>{rec.recommendation.toUpperCase()}</span> : '—'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => navigate(`/stock/${h.ticker}`)}>
+                          <ExternalLink size={11} /> Analyze
+                        </button>
+                        <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => handleDelete(h.id)}>
+                          <Trash2 size={11} />
+                        </button>
                       </div>
-                    </div>
-                  </td>
-                  <td className="mono">{h.shares}</td>
-                  <td className="mono">{money(h.avgBuyPrice)}</td>
-                  <td className="mono">
-                    <div>{money(h.currentPrice)}</div>
-                    <div style={{ fontSize: 11, color: h.dailyChange >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {h.dailyChange >= 0 ? '+' : ''}{h.dailyChangePercent?.toFixed(2)}%
-                    </div>
-                  </td>
-                  <td className="mono">{money(h.totalValue)}</td>
-                  <td className={`mono ${h.pnl >= 0 ? 'pos' : 'neg'}`}>{signedMoney(h.pnl)}</td>
-                  <td className={`mono ${h.pnlPercent >= 0 ? 'pos' : 'neg'}`}>{h.pnlPercent >= 0 ? '+' : ''}{h.pnlPercent?.toFixed(2)}%</td>
-                  <td className="mono">{h.technical?.rsi?.value?.toFixed(1) || 'N/A'}</td>
-                  <td className={`mono ${(h.technical?.macd?.histogram || 0) >= 0 ? 'pos' : 'neg'}`}>{h.technical?.macd?.histogram?.toFixed(3) || 'N/A'}</td>
-                  <td>{rec ? <span className={`badge badge-${rec.recommendation}`}>{rec.recommendation.toUpperCase()}</span> : '—'}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => navigate(`/stock/${h.ticker}`)}>
-                        <ExternalLink size={11} /> Analyze
-                      </button>
-                      <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => handleDelete(h.id)}>
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {showModal && <AddModal onClose={() => setShowModal(false)} onAdd={() => { setShowModal(false); load(); }} />}

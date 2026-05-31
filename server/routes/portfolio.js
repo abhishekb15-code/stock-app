@@ -3,50 +3,82 @@ const router = express.Router();
 const db = require('../models/db');
 const { getStockAnalysis, normalizeSymbol } = require('../services/indianMarketData');
 
+// Enrich a holding with live price — falls back to avgBuyPrice if Yahoo is unavailable
 async function enrichHolding(holding) {
-  const stock = await getStockAnalysis(holding.ticker);
-  const currentPrice = stock.price;
-  const totalValue = currentPrice * holding.shares;
-  const totalCost = holding.avgBuyPrice * holding.shares;
-  const pnl = totalValue - totalCost;
-  const pnlPercent = ((currentPrice - holding.avgBuyPrice) / holding.avgBuyPrice) * 100;
+  let currentPrice = holding.avgBuyPrice;
+  let change = 0, changePercent = 0;
+  let sector = 'Unknown', name = holding.ticker.replace('.NS','').replace('.BO','');
+  let technical = null;
+  let liveOk = false;
+
+  try {
+    const stock = await getStockAnalysis(holding.ticker);
+    currentPrice    = stock.price;
+    change          = stock.change;
+    changePercent   = stock.changePercent;
+    sector          = stock.sector || 'Unknown';
+    name            = stock.name  || name;
+    technical       = stock.technical;
+    liveOk          = true;
+  } catch (err) {
+    // Live fetch failed — use cost price so UI still renders
+    console.warn(`⚠️  Live price unavailable for ${holding.ticker}: ${err.message}`);
+  }
+
+  const totalValue  = currentPrice * holding.shares;
+  const totalCost   = holding.avgBuyPrice * holding.shares;
+  const pnl         = totalValue - totalCost;
+  const pnlPercent  = ((currentPrice - holding.avgBuyPrice) / holding.avgBuyPrice) * 100;
+
   return {
     ...holding,
-    ticker: stock.ticker,
-    displayTicker: stock.displayTicker,
-    yahooSymbol: stock.yahooSymbol,
-    currentPrice,
-    dailyChange: stock.change,
-    dailyChangePercent: stock.changePercent,
-    totalValue: +totalValue.toFixed(2),
-    totalCost: +totalCost.toFixed(2),
-    pnl: +pnl.toFixed(2),
-    pnlPercent: +pnlPercent.toFixed(2),
-    sector: stock.sector || 'Unknown',
-    name: stock.name || holding.ticker,
-    technical: stock.technical,
+    displayTicker:      holding.ticker.replace('.NS','').replace('.BO',''),
+    yahooSymbol:        holding.ticker,
+    currentPrice:       +currentPrice.toFixed(2),
+    dailyChange:        +change.toFixed(2),
+    dailyChangePercent: +changePercent.toFixed(2),
+    totalValue:         +totalValue.toFixed(2),
+    totalCost:          +totalCost.toFixed(2),
+    pnl:                +pnl.toFixed(2),
+    pnlPercent:         +pnlPercent.toFixed(2),
+    sector,
+    name,
+    technical,
+    livePrice:          liveOk,
   };
 }
 
 // GET /api/portfolio
 router.get('/', async (req, res) => {
   try {
-    const holdings = await Promise.all(db.portfolio.findAll().map(enrichHolding));
-    const totalValue = holdings.reduce((s, h) => s + h.totalValue, 0);
-    const totalCost = holdings.reduce((s, h) => s + h.totalCost, 0);
-    const totalPnl = totalValue - totalCost;
-    const dailyPnl = holdings.reduce((s, h) => s + h.dailyChange * h.shares, 0);
+    const raw = db.portfolio.findAll();
+    const holdings = await Promise.all(raw.map(h => enrichHolding(h)));
 
-    // Sector allocation
+    const totalValue = holdings.reduce((s, h) => s + h.totalValue, 0);
+    const totalCost  = holdings.reduce((s, h) => s + h.totalCost,  0);
+    const totalPnl   = totalValue - totalCost;
+    const dailyPnl   = holdings.reduce((s, h) => s + h.dailyChange * h.shares, 0);
+
     const sectors = {};
-    holdings.forEach(h => {
-      sectors[h.sector] = (sectors[h.sector] || 0) + h.totalValue;
-    });
+    holdings.forEach(h => { sectors[h.sector] = (sectors[h.sector] || 0) + h.totalValue; });
     const sectorAllocation = Object.entries(sectors).map(([sector, value]) => ({
-      sector, value: +value.toFixed(2), percent: totalValue ? +((value / totalValue) * 100).toFixed(1) : 0,
+      sector,
+      value:   +value.toFixed(2),
+      percent: totalValue ? +((value / totalValue) * 100).toFixed(1) : 0,
     }));
 
-    res.json({ holdings, summary: { totalValue: +totalValue.toFixed(2), totalCost: +totalCost.toFixed(2), totalPnl: +totalPnl.toFixed(2), totalPnlPercent: totalCost ? +((totalPnl / totalCost) * 100).toFixed(2) : 0, dailyPnl: +dailyPnl.toFixed(2), holdingCount: holdings.length }, sectorAllocation });
+    res.json({
+      holdings,
+      summary: {
+        totalValue:      +totalValue.toFixed(2),
+        totalCost:       +totalCost.toFixed(2),
+        totalPnl:        +totalPnl.toFixed(2),
+        totalPnlPercent: totalCost ? +((totalPnl / totalCost) * 100).toFixed(2) : 0,
+        dailyPnl:        +dailyPnl.toFixed(2),
+        holdingCount:    holdings.length,
+      },
+      sectorAllocation,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -56,8 +88,14 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { ticker, shares, avgBuyPrice, purchaseDate, notes } = req.body;
-    if (!ticker || !shares || !avgBuyPrice) return res.status(400).json({ error: 'ticker, shares, and avgBuyPrice are required' });
-    const holding = db.portfolio.create({ ticker: normalizeSymbol(ticker), shares: +shares, avgBuyPrice: +avgBuyPrice, purchaseDate: purchaseDate || new Date().toISOString().split('T')[0], notes: notes || '' });
+    if (!ticker || !shares || !avgBuyPrice)
+      return res.status(400).json({ error: 'ticker, shares, and avgBuyPrice are required' });
+    const holding = db.portfolio.create({
+      ticker: normalizeSymbol(ticker), shares: +shares,
+      avgBuyPrice: +avgBuyPrice,
+      purchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
+      notes: notes || '',
+    });
     res.status(201).json(await enrichHolding(holding));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -68,11 +106,9 @@ router.post('/', async (req, res) => {
 router.post('/import', async (req, res) => {
   try {
     const { holdings, mode } = req.body;
-    if (!Array.isArray(holdings) || holdings.length === 0) {
+    if (!Array.isArray(holdings) || holdings.length === 0)
       return res.status(400).json({ error: 'holdings must be a non-empty array' });
-    }
-
-    const saved = db.portfolio.importMany(holdings, mode === 'append' ? 'append' : 'replace');
+    const saved    = db.portfolio.importMany(holdings, mode === 'append' ? 'append' : 'replace');
     const enriched = await Promise.all(saved.map(enrichHolding));
     res.status(201).json({ imported: holdings.length, saved: enriched.length, holdings: enriched });
   } catch (err) {
@@ -85,7 +121,7 @@ router.delete('/:id', (req, res) => {
   try {
     const deleted = db.portfolio.delete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Holding not found' });
-    res.json({ success: true, message: 'Holding removed' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
