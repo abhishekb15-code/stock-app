@@ -1,0 +1,25 @@
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/components/layout/Sidebar.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/index.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/Portfolio.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/StockDeepDive.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/WhaleSignals.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/models/db.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/routes/email.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/routes/portfolio.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/routes/stocks.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/routes/whales.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/indianMarketData.js', LF will be replaced by CRLF the next time Git touches it
+ .gitignore                              |  1 [32m+[m
+ client/src/components/layout/Sidebar.js |  5 [32m++[m[31m-[m
+ client/src/index.css                    |  3 [32m++[m
+ client/src/pages/Portfolio.js           | 59 [32m++++++++++++++++++++++++[m[31m-[m
+ client/src/pages/StockDeepDive.js       | 29 [32m+++++++++++[m[31m-[m
+ client/src/pages/WhaleSignals.js        | 16 [32m+++[m[31m----[m
+ server/models/db.js                     | 78 [32m+++++++++++++++++++++++++++++[m[31m----[m
+ server/routes/email.js                  |  3 [32m+[m[31m-[m
+ server/routes/portfolio.js              | 16 [32m+++++++[m
+ server/routes/stocks.js                 | 21 [32m+++++++[m[31m--[m
+ server/routes/whales.js                 | 10 [32m+++[m[31m--[m
+ server/services/indianMarketData.js     | 51 [32m++++++++++++++++++++[m[31m-[m
+ 12 files changed, 260 insertions(+), 32 deletions(-)

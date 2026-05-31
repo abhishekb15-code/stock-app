@@ -84,6 +84,9 @@ body {
 .badge-options { background: #06b6d422; color: var(--cyan); border: 1px solid #06b6d444; }
 .badge-volume_spike { background: var(--amber-dim); color: var(--amber); border: 1px solid #f59e0b44; }
 .badge-dark_pool { background: #ffffff11; color: #94a3b8; border: 1px solid #334155; }
+.badge-institutional { background: #8b5cf622; color: var(--purple); border: 1px solid #8b5cf644; }
+.badge-analyst { background: #06b6d422; color: var(--cyan); border: 1px solid #06b6d444; }
+.badge-momentum { background: var(--green-dim); color: var(--green); border: 1px solid #10b98144; }
 
 /* Positive/Negative colors */
 .pos { color: var(--green); }

@@ -64,6 +64,22 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST /api/portfolio/import
+router.post('/import', async (req, res) => {
+  try {
+    const { holdings, mode } = req.body;
+    if (!Array.isArray(holdings) || holdings.length === 0) {
+      return res.status(400).json({ error: 'holdings must be a non-empty array' });
+    }
+
+    const saved = db.portfolio.importMany(holdings, mode === 'append' ? 'append' : 'replace');
+    const enriched = await Promise.all(saved.map(enrichHolding));
+    res.status(201).json({ imported: holdings.length, saved: enriched.length, holdings: enriched });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /api/portfolio/:id
 router.delete('/:id', (req, res) => {
   try {

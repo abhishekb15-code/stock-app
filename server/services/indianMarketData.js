@@ -170,6 +170,16 @@ async function getQuote(input) {
   };
 }
 
+async function getAssetProfile(input) {
+  try {
+    const symbol = normalizeSymbol(input);
+    const summary = await yahooFinance.quoteSummary(symbol, { modules: ['assetProfile'] });
+    return summary.assetProfile || {};
+  } catch (err) {
+    return {};
+  }
+}
+
 async function getHistorical(input) {
   const symbol = normalizeSymbol(input);
   const period1 = new Date();
@@ -280,7 +290,7 @@ async function getFundamentals(input) {
 
   try {
     summary = await yahooFinance.quoteSummary(quote.ticker, {
-      modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData', 'price'],
+      modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData', 'price', 'assetProfile'],
     });
   } catch (err) {
     summary = {};
@@ -289,6 +299,7 @@ async function getFundamentals(input) {
   const summaryDetail = summary.summaryDetail || {};
   const keyStats = summary.defaultKeyStatistics || {};
   const financialData = summary.financialData || {};
+  const profile = summary.assetProfile || {};
   const targetMeanPrice = financialData.targetMeanPrice;
   const fairValue = Number.isFinite(Number(targetMeanPrice)) ? targetMeanPrice : quote.price;
   const upside = quote.price ? ((fairValue - quote.price) / quote.price) * 100 : 0;
@@ -301,7 +312,8 @@ async function getFundamentals(input) {
     ticker: quote.ticker,
     displayTicker: quote.displayTicker,
     name: quote.name,
-    sector: quote.sector,
+    sector: profile.sector || quote.sector,
+    industry: profile.industry || profile.industryDisp || 'Unknown',
     fundamentals: {
       peRatio: round(summaryDetail.trailingPE ?? keyStats.trailingPE, 2),
       pbRatio: round(keyStats.priceToBook, 2),
@@ -324,6 +336,39 @@ async function getFundamentals(input) {
         ? `Yahoo Finance analyst target mean price implies ${round(upside, 1)}% ${upside >= 0 ? 'upside' : 'downside'} from the current NSE price.`
         : 'Yahoo Finance does not currently provide an analyst target for this NSE symbol, so fair value is shown as the current live price.',
     },
+  };
+}
+
+async function getDevelopments(input) {
+  const quote = await getQuote(input);
+  const [profile, insightsResult] = await Promise.all([
+    getAssetProfile(quote.ticker),
+    yahooFinance.insights(quote.ticker).catch(() => null),
+  ]);
+
+  const significant = (insightsResult?.sigDevs || []).map(item => ({
+    title: item.headline,
+    date: item.date,
+    publisher: 'Yahoo Finance Insights',
+    link: item.link || null,
+    type: 'company',
+  }));
+
+  const summary = profile.longBusinessSummary
+    ? profile.longBusinessSummary.split('. ').slice(0, 2).join('. ') + '.'
+    : `${quote.name} is listed on ${quote.exchange}.`;
+
+  return {
+    ticker: quote.ticker,
+    displayTicker: quote.displayTicker,
+    company: quote.name,
+    sector: profile.sector || quote.sector || 'Unknown',
+    industry: profile.industry || profile.industryDisp || 'Unknown',
+    website: profile.website || null,
+    summary,
+    significantDevelopments: significant,
+    industrySummary: `${profile.industry || profile.industryDisp || 'The company industry'} sits in the ${profile.sector || quote.sector || 'broader market'} space. Watch crude/input prices, regulatory policy, interest rates, demand trends, and earnings commentary for industry-wide impact.`,
+    lastUpdated: new Date().toISOString(),
   };
 }
 
@@ -381,8 +426,10 @@ module.exports = {
   normalizeSymbol,
   displaySymbol,
   getQuote,
+  getAssetProfile,
   getStockAnalysis,
   getFundamentals,
+  getDevelopments,
   getPortfolioHoldings,
   getWhaleSignals,
   generateRecommendation,

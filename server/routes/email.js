@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../models/db');
 const { getStockAnalysis, getFundamentals, generateRecommendation } = require('../services/indianMarketData');
 const { sendDailyDigest } = require('../services/emailService');
+const { getSignalsForPortfolio } = require('../services/signalsService');
 
 async function runFullAnalysis() {
   const holdings = db.portfolio.findAll();
@@ -30,7 +31,7 @@ async function runFullAnalysis() {
     });
   }
 
-  const whaleSignals = db.whales.findAll();
+  const whaleSignals = [...await getSignalsForPortfolio(holdings), ...db.whales.findAll()];
   return { holdings: enrichedHoldings, recommendations, whaleSignals };
 }
 

@@ -5,14 +5,14 @@ import { Fish, Building2, BarChart2, Activity, TrendingDown, ExternalLink } from
 
 const SIGNAL_TYPES = [
   { key: '', label: 'All Signals', icon: Fish },
-  { key: '13f', label: '13F Filings', icon: Building2 },
-  { key: 'options', label: 'Options Flow', icon: BarChart2 },
+  { key: 'institutional', label: 'Institutional', icon: Building2 },
+  { key: 'analyst', label: 'Analyst Targets', icon: BarChart2 },
   { key: 'volume_spike', label: 'Volume Spikes', icon: Activity },
-  { key: 'dark_pool', label: 'Dark Pool', icon: TrendingDown },
+  { key: 'momentum', label: 'Momentum', icon: TrendingDown },
 ];
 
-const TYPE_ICONS = { '13f': Building2, 'options': BarChart2, 'volume_spike': Activity, 'dark_pool': TrendingDown };
-const TYPE_LABELS = { '13f': '13F Filing', 'options': 'Options Flow', 'volume_spike': 'Volume Spike', 'dark_pool': 'Dark Pool' };
+const TYPE_ICONS = { institutional: Building2, analyst: BarChart2, volume_spike: Activity, momentum: TrendingDown };
+const TYPE_LABELS = { institutional: 'Institutional', analyst: 'Analyst Target', volume_spike: 'Volume Spike', momentum: 'Momentum' };
 
 export default function WhaleSignals() {
   const [signals, setSignals] = useState([]);
@@ -34,8 +34,8 @@ export default function WhaleSignals() {
   return (
     <div className="fade-in">
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>🐋 Whale & Institutional Signals</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>Track big money moves: 13F filings, unusual options, dark pool prints, and volume spikes.</p>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Whale & Institutional Signals</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>Live NSE signals from portfolio volume spikes, institutional ownership, analyst targets, and momentum.</p>
       </div>
 
       {/* Filter pills */}
@@ -83,7 +83,7 @@ export default function WhaleSignals() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <span style={{ fontWeight: 800, fontSize: 16, cursor: 'pointer', color: 'var(--blue)' }}
-                            onClick={() => navigate(`/stock/${signal.ticker}`)}>{signal.ticker}</span>
+                            onClick={() => navigate(`/stock/${signal.ticker}`)}>{signal.displayTicker || signal.ticker}</span>
                           <span className={`badge badge-${signal.signalType}`}>{TYPE_LABELS[signal.signalType]}</span>
                           {signal.institutionName && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>by {signal.institutionName}</span>}
                         </div>

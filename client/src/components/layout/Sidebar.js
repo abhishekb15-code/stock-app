@@ -98,12 +98,13 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Email trigger */}
+      {/* Digest trigger */}
       <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
         <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }}
+          title="Runs the portfolio analysis digest now. If Gmail is configured it sends an email; otherwise it logs the report on the server."
           onClick={triggerEmail} disabled={sending}>
           <Mail size={14} />
-          {sending ? 'Running...' : 'Run Digest Now'}
+          {sending ? 'Running...' : 'Send Digest'}
         </button>
         {emailMsg && <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center', marginTop: 8 }}>{emailMsg}</div>}
       </div>

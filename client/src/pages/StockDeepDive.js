@@ -54,7 +54,7 @@ export default function StockDeepDive() {
 
   if (!data) return <div style={{ color: 'var(--red)', padding: 40 }}>Failed to load {ticker}</div>;
 
-  const { technical, fundamentals, valuation, chartData, name, price, change, changePercent } = data;
+  const { technical, fundamentals, valuation, chartData, name, price, change, changePercent, developments } = data;
   const isPos = change >= 0;
   const titleTicker = data.displayTicker || ticker;
 
@@ -223,6 +223,33 @@ export default function StockDeepDive() {
               Technical indicators show {technical.trend.toLowerCase()} momentum with RSI at {technical.rsi.value.toFixed(0)} ({technical.rsi.signal}).
               The stock is {valuation?.score?.toLowerCase()} based on Yahoo Finance valuation data with {valuation?.upside > 0 ? `${valuation.upside}% upside` : `${Math.abs(valuation?.upside)}% downside`} to fair value of {money(valuation?.fairValue)}.
               Key technical levels: support at {money(technical.support)}, resistance at {money(technical.resistance)}, and Bollinger Bands from {money(technical.bollingerBands?.lower)} to {money(technical.bollingerBands?.upper)}.
+            </p>
+          </div>
+          <div className="card" style={{ marginTop: 16 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Latest Company & Industry Developments</div>
+            {developments?.summary && (
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 12 }}>
+                {developments.summary}
+              </p>
+            )}
+            <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+              {(developments?.significantDevelopments || []).slice(0, 4).map(item => (
+                <a key={`${item.title}-${item.date}`} href={item.link || `https://finance.yahoo.com/quote/${data.ticker}`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ textDecoration: 'none', color: 'var(--text-primary)', background: 'var(--bg-800)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.5 }}>{item.title}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {item.publisher} · {item.date ? new Date(item.date).toLocaleDateString('en-IN') : 'Recent'}
+                  </div>
+                </a>
+              ))}
+              {(!developments?.significantDevelopments || developments.significantDevelopments.length === 0) && (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No recent Yahoo Finance significant developments found for this symbol.</div>
+              )}
+            </div>
+            <InfoRow label="Industry" value={developments?.industry || 'Unknown'} />
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, marginTop: 10 }}>
+              {developments?.industrySummary}
             </p>
           </div>
         </div>

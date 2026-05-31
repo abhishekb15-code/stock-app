@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Plus, Trash2, Download, X, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Download, X, ExternalLink, Upload } from 'lucide-react';
 
 const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signedMoney = (value) => `${value >= 0 ? '+' : '-'}${money(Math.abs(value))}`;
@@ -70,6 +70,7 @@ export default function Portfolio() {
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
   const load = () => {
@@ -100,6 +101,58 @@ export default function Portfolio() {
     a.click();
   };
 
+  const splitCsvLine = (line) => {
+    const values = [];
+    let current = '';
+    let quoted = false;
+    for (const char of line) {
+      if (char === '"') quoted = !quoted;
+      else if (char === ',' && !quoted) {
+        values.push(current.trim());
+        current = '';
+      } else current += char;
+    }
+    values.push(current.trim());
+    return values;
+  };
+
+  const parseImportFile = (text, filename) => {
+    if (filename.toLowerCase().endsWith('.json')) {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed : parsed.holdings;
+    }
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const headers = splitCsvLine(lines[0]).map(h => h.trim().toLowerCase().replace(/[\s_-]/g, ''));
+    return lines.slice(1).map(line => {
+      const values = splitCsvLine(line);
+      const row = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+      return {
+        ticker: row.ticker || row.symbol || row.nsesymbol,
+        shares: row.shares || row.quantity || row.qty,
+        avgBuyPrice: row.avgbuyprice || row.buyprice || row.averageprice,
+        purchaseDate: row.purchasedate || row.date,
+        notes: row.notes,
+      };
+    });
+  };
+
+  const handleImport = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const holdings = parseImportFile(text, file.name);
+      if (!Array.isArray(holdings) || holdings.length === 0) throw new Error('No holdings found');
+      if (!window.confirm(`Import ${holdings.length} holdings? This will replace the current saved portfolio.`)) return;
+      await axios.post('/api/portfolio/import', { holdings, mode: 'replace' });
+      load();
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   if (loading) return <div style={{ padding: 40, color: 'var(--text-muted)' }}>Loading portfolio...</div>;
 
   const { summary, holdings } = portfolio;
@@ -112,6 +165,8 @@ export default function Portfolio() {
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{holdings.length} positions · Total: {money(summary.totalValue)}</div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <input ref={fileInputRef} type="file" accept=".csv,.json" onChange={handleImport} style={{ display: 'none' }} />
+          <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Import CSV/JSON</button>
           <button className="btn btn-ghost" onClick={exportCSV}><Download size={14} /> Export CSV</button>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={14} /> Add Holding</button>
         </div>

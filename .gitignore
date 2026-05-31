@@ -5,6 +5,7 @@ server/node_modules/
 client/build/
 server/*.log
 *.log
+server/data/
 
 .env
 server/.env
