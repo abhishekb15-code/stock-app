@@ -1,0 +1,45 @@
+name: 📈 Daily Morning Digest
+
+on:
+  schedule:
+    # 7:00 AM GST = 3:00 AM UTC (GST is UTC+4)
+    - cron: '0 3 * * 1-5'   # Mon–Fri only (Indian market days)
+  workflow_dispatch:         # Also allow manual trigger from GitHub UI
+
+jobs:
+  send-digest:
+    name: Run Portfolio Digest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm install
+        working-directory: server
+
+      - name: Run digest script
+        working-directory: server
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+          NODE_ENV: production
+        run: node scripts/digest.js
+
+      - name: Upload digest log as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-log-${{ github.run_id }}
+          path: server/digest-output.json
+          retention-days: 30
+          if-no-files-found: ignore

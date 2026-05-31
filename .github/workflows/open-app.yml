@@ -1,0 +1,154 @@
+name: 🚀 Open App in Browser
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'App URL to open (default: localhost:3000)'
+        required: false
+        default: 'http://localhost:3000'
+        type: string
+      page:
+        description: 'Which page to open'
+        required: false
+        default: 'dashboard'
+        type: choice
+        options:
+          - dashboard
+          - portfolio
+          - whales
+          - stock/RELIANCE
+          - stock/TCS
+          - stock/INFY
+          - stock/HDFCBANK
+
+jobs:
+  open-app:
+    name: Open App & Run Health Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm install
+        working-directory: server
+
+      - name: Start backend server
+        working-directory: server
+        env:
+          NODE_ENV: production
+          PORT: 5000
+        run: |
+          node index.js &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          echo "⏳ Waiting for server to start..."
+          sleep 8
+
+      - name: Health check
+        run: |
+          echo "🔍 Checking server health..."
+          curl -sf http://localhost:5000/api/health | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          print('✅ Server is healthy')
+          print(f'   Status  : {d[\"status\"]}')
+          print(f'   Market  : {d[\"market\"]}')
+          print(f'   Provider: {d[\"dataProvider\"]}')
+          print(f'   Time    : {d[\"timestamp\"]}')
+          "
+
+      - name: Check portfolio endpoint
+        run: |
+          echo ""
+          echo "📊 Portfolio API check..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/portfolio)
+          echo "   /api/portfolio → HTTP $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            curl -sf http://localhost:5000/api/portfolio | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          s = d.get('summary', {})
+          print(f'   Holdings : {s.get(\"holdingCount\", 0)}')
+          print(f'   Total Value : ₹{s.get(\"totalValue\", 0):,.2f}')
+          print(f'   Total P&L   : ₹{s.get(\"totalPnl\", 0):,.2f}')
+            " 2>/dev/null || echo "   (Live data fetch — results depend on network access)"
+          fi
+
+      - name: Check whale signals endpoint
+        run: |
+          echo ""
+          echo "🐋 Whale Signals API check..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/whales)
+          echo "   /api/whales → HTTP $STATUS"
+
+      - name: Build full URL to open
+        id: build-url
+        run: |
+          BASE="${{ github.event.inputs.app_url }}"
+          PAGE="${{ github.event.inputs.page }}"
+          # Map page names to paths
+          case "$PAGE" in
+            dashboard) PATH_SUFFIX="/" ;;
+            portfolio) PATH_SUFFIX="/portfolio" ;;
+            whales)    PATH_SUFFIX="/whales" ;;
+            *)         PATH_SUFFIX="/$PAGE" ;;
+          esac
+          # Strip trailing slash from base then append path
+          FULL_URL="${BASE%/}${PATH_SUFFIX}"
+          echo "full_url=$FULL_URL" >> $GITHUB_OUTPUT
+          echo "path_suffix=$PATH_SUFFIX" >> $GITHUB_OUTPUT
+
+      - name: Print open instructions
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🌐  OPEN THIS URL IN YOUR BROWSER:"
+          echo ""
+          echo "    ${{ steps.build-url.outputs.full_url }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "📋 Page selected : ${{ github.event.inputs.page }}"
+          echo "🔗 Full URL      : ${{ steps.build-url.outputs.full_url }}"
+          echo ""
+          echo "💡 Tip: To run the app locally first:"
+          echo "   cd server && node index.js"
+          echo "   cd client && npm start"
+          echo ""
+          echo "   Then visit: http://localhost:3000${{ steps.build-url.outputs.path_suffix }}"
+
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## 🚀 Stock Intelligence App
+
+          | Field | Value |
+          |-------|-------|
+          | **URL to open** | `${{ steps.build-url.outputs.full_url }}` |
+          | **Page** | ${{ github.event.inputs.page }} |
+          | **Backend health** | ✅ Verified |
+          | **Run at** | ${{ github.run_id }} |
+
+          ### Open in browser
+          Click the link below (works when app is running locally):
+
+          👉 **[${{ steps.build-url.outputs.full_url }}](${{ steps.build-url.outputs.full_url }})**
+
+          ### Run locally
+          ```bash
+          # Terminal 1 — backend
+          cd server && node index.js
+
+          # Terminal 2 — frontend
+          cd client && npm start
+          ```
+          EOF
