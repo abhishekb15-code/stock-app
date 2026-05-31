@@ -4,6 +4,7 @@ const { sendDailyDigest } = require('../services/emailService');
 
 function initScheduler() {
   // Runs every day at 7:00 AM server time
+  // 7:00 AM GST (Gulf Standard Time = Asia/Dubai = UTC+4)
   cron.schedule('0 7 * * 1-5', async () => {
     console.log('\n⏰ Daily digest cron triggered at', new Date().toLocaleTimeString());
     try {
@@ -13,9 +14,9 @@ function initScheduler() {
     } catch (err) {
       console.error('❌ Cron job failed:', err.message);
     }
-  }, { timezone: 'America/New_York' });
+  }, { timezone: 'Asia/Dubai' });
 
-  console.log('⏰ Scheduler initialized — daily digest runs at 7:00 AM ET (Mon–Fri)');
+  console.log('⏰ Scheduler initialized — daily digest runs at 7:00 AM GST (Mon–Fri)');
 }
 
 module.exports = { initScheduler };
