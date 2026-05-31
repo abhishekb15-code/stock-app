@@ -3,11 +3,6 @@ name: 🚀 Open App in Browser
 on:
   workflow_dispatch:
     inputs:
-      app_url:
-        description: 'App URL to open'
-        required: false
-        default: 'http://localhost:5000'
-        type: string
       page:
         description: 'Which page to open'
         required: false
@@ -21,11 +16,22 @@ on:
           - stock/TCS
           - stock/INFY
           - stock/HDFCBANK
+      duration:
+        description: 'Keep alive for how long?'
+        required: false
+        default: '10'
+        type: choice
+        options:
+          - '5'
+          - '10'
+          - '20'
+          - '30'
 
 jobs:
   open-app:
-    name: Open App & Run Health Check
+    name: 🌐 Serve App with Public URL
     runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout code
@@ -36,90 +42,126 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install server dependencies
-        run: npm install
-        working-directory: server
-
-      - name: Install client dependencies
-        run: npm install
-        working-directory: client
+      - name: Install dependencies
+        run: |
+          cd server && npm install
+          cd ../client && npm install
 
       - name: Build React frontend
         run: CI=false npm run build
         working-directory: client
 
-      - name: Start server (serves API + React on port 5000)
+      - name: Start app server
         working-directory: server
         env:
           NODE_ENV: production
           PORT: 5000
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
         run: |
           node index.js &
-          echo "⏳ Waiting for server to start..."
-          sleep 8
+          sleep 6
+          curl -sf http://localhost:5000/api/health > /dev/null && echo "✅ Server started" || echo "❌ Server failed"
 
-      - name: Health check
+      - name: Install Cloudflare Tunnel (cloudflared)
         run: |
-          curl -sf http://localhost:5000/api/health | python3 -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          print('✅ Server healthy')
-          print(f'   Market        : {d[\"market\"]}')
-          print(f'   Provider      : {d[\"dataProvider\"]}')
-          print(f'   Serves UI     : {d[\"servesFrontend\"]}')
-          "
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+          cloudflared --version
 
-      - name: Build URL and print instructions
-        id: build-url
+      - name: Start tunnel & get public URL
+        id: tunnel
         run: |
-          BASE="${{ github.event.inputs.app_url }}"
+          # Start tunnel in background, pipe output to log
+          cloudflared tunnel --url http://localhost:5000 --no-autoupdate 2>&1 &
+          echo "⏳ Waiting for tunnel URL..."
+          sleep 12
+
+          # Extract the public URL from cloudflared output
+          URL=$(cloudflared tunnel --url http://localhost:5000 --no-autoupdate 2>&1 &
+                sleep 8
+                curl -s http://localhost:4040/api/tunnels 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['tunnels'][0]['public_url'])" 2>/dev/null || true)
+
+          # Alternative: parse from cloudflared metrics
+          TUNNEL_URL=$(curl -s http://localhost:20241/metrics 2>/dev/null | grep -o 'https://[^"]*\.trycloudflare\.com' | head -1 || true)
+
+          if [ -z "$TUNNEL_URL" ]; then
+            # Restart and capture URL from stderr
+            pkill cloudflared 2>/dev/null || true
+            sleep 2
+            cloudflared tunnel --url http://localhost:5000 --no-autoupdate > /tmp/cf.log 2>&1 &
+            sleep 15
+            TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' /tmp/cf.log | head -1)
+          fi
+
+          echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+          echo "tunnel_url=$TUNNEL_URL" >> $GITHUB_OUTPUT
+          echo ""
+          echo "🌐 Public URL: $TUNNEL_URL"
+
+      - name: Get page path
+        id: page
+        run: |
           PAGE="${{ github.event.inputs.page }}"
           case "$PAGE" in
-            dashboard) SUFFIX="/" ;;
+            dashboard) SUFFIX="" ;;
             portfolio) SUFFIX="/portfolio" ;;
             whales)    SUFFIX="/whales" ;;
             *)         SUFFIX="/$PAGE" ;;
           esac
-          FULL_URL="${BASE%/}${SUFFIX}"
-          echo "full_url=$FULL_URL" >> $GITHUB_OUTPUT
-          echo "path_suffix=$SUFFIX" >> $GITHUB_OUTPUT
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🌐  OPEN THIS URL IN YOUR BROWSER:"
-          echo ""
-          echo "    $FULL_URL"
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-          echo "💡 Single command to run the app locally:"
-          echo "   cd server && node index.js"
-          echo "   Then open: http://localhost:5000$SUFFIX"
+          FULL="${{ steps.tunnel.outputs.tunnel_url }}${SUFFIX}"
+          echo "full_url=$FULL" >> $GITHUB_OUTPUT
+          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
 
-      - name: Write job summary
+      - name: 🎯 Print clickable URL
         run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║                                                          ║"
+          echo "║   🌐  CLICK THIS LINK TO OPEN THE APP:                  ║"
+          echo "║                                                          ║"
+          echo "║   ${{ steps.page.outputs.full_url }}"
+          echo "║                                                          ║"
+          echo "║   ⏰  Live for ${{ github.event.inputs.duration }} minutes                          ║"
+          echo "║                                                          ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
+          echo ""
+
+      - name: Write summary with clickable link
+        run: |
+          PAGE_URL="${{ steps.page.outputs.full_url }}"
+          BASE_URL="${{ steps.tunnel.outputs.tunnel_url }}"
           cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## 🚀 Stock Intelligence App
+          # 🚀 Stock Intelligence App is LIVE
 
-          | | |
-          |---|---|
-          | **URL** | \`${{ steps.build-url.outputs.full_url }}\` |
-          | **Page** | ${{ github.event.inputs.page }} |
-          | **Backend health** | ✅ Verified |
-          | **Frontend** | ✅ Built & served from Express |
+          ## 👇 Click to open
 
-          ### 👉 Open in your browser
-          [${{ steps.build-url.outputs.full_url }}](${{ steps.build-url.outputs.full_url }})
+          # [${{ github.event.inputs.page }} → $PAGE_URL]($PAGE_URL)
 
           ---
 
-          ### Run locally (single command)
-          \`\`\`bash
-          # Step 1 — build frontend once
-          cd client && npm run build
+          | | |
+          |---|---|
+          | **Base URL** | $BASE_URL |
+          | **Page** | ${{ github.event.inputs.page }} |
+          | **Live for** | ${{ github.event.inputs.duration }} minutes |
 
-          # Step 2 — start server (serves UI + API on port 5000)
-          cd server && node index.js
-          \`\`\`
-
-          Then open **http://localhost:5000** in your browser.
+          ## All pages
+          | Page | Link |
+          |------|------|
+          | Dashboard | [$BASE_URL]($BASE_URL) |
+          | Portfolio | [$BASE_URL/portfolio]($BASE_URL/portfolio) |
+          | Whale Signals | [$BASE_URL/whales]($BASE_URL/whales) |
+          | RELIANCE | [$BASE_URL/stock/RELIANCE.NS]($BASE_URL/stock/RELIANCE.NS) |
+          | TCS | [$BASE_URL/stock/TCS.NS]($BASE_URL/stock/TCS.NS) |
           EOF
+
+      - name: Keep alive for selected duration
+        run: |
+          MINS=${{ github.event.inputs.duration }}
+          echo "⏳ App is live at ${{ steps.tunnel.outputs.tunnel_url }}"
+          echo "   Keeping alive for ${MINS} minutes..."
+          sleep $((MINS * 60))
+          echo "🛑 Session ended."
