@@ -2,9 +2,8 @@ name: 📈 Daily Morning Digest
 
 on:
   schedule:
-    # 7:00 AM GST = 3:00 AM UTC (GST is UTC+4)
-    - cron: '0 3 * * 1-5'   # Mon–Fri only (Indian market days)
-  workflow_dispatch:         # Also allow manual trigger from GitHub UI
+    - cron: '0 3 * * 1-5'   # 7:00 AM GST (UTC+4) Mon-Fri
+  workflow_dispatch:
 
 jobs:
   send-digest:
@@ -25,6 +24,22 @@ jobs:
       - name: Install server dependencies
         run: npm install
         working-directory: server
+
+      - name: Test Yahoo Finance connectivity
+        working-directory: server
+        run: |
+          echo "🔍 Testing Yahoo Finance access..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
+            -H "Accept: application/json" \
+            "https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?interval=1d&range=1d")
+          echo "Yahoo Finance v8 status: $STATUS"
+          STATUS2=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            -H "User-Agent: Mozilla/5.0" \
+            "https://query2.finance.yahoo.com/v7/finance/quote?symbols=RELIANCE.NS")
+          echo "Yahoo Finance v7 status: $STATUS2"
 
       - name: Run digest script
         working-directory: server
