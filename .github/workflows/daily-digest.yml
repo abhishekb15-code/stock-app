@@ -25,36 +25,26 @@ jobs:
         run: npm install
         working-directory: server
 
-      - name: Test Yahoo Finance connectivity
-        working-directory: server
-        run: |
-          echo "🔍 Testing Yahoo Finance access..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 10 \
-            -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
-            -H "Accept: application/json" \
-            "https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?interval=1d&range=1d")
-          echo "Yahoo Finance v8 status: $STATUS"
-          STATUS2=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 10 \
-            -H "User-Agent: Mozilla/5.0" \
-            "https://query2.finance.yahoo.com/v7/finance/quote?symbols=RELIANCE.NS")
-          echo "Yahoo Finance v7 status: $STATUS2"
-
-      - name: Run digest script
+      - name: Run digest
         working-directory: server
         env:
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+          GMAIL_USER:                  ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD:          ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENT:             ${{ secrets.EMAIL_RECIPIENT }}
+          TWELVE_DATA_API_KEY:         ${{ secrets.TWELVE_DATA_API_KEY }}
+          ANTHROPIC_API_KEY:           ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SHEET_CSV_URL:        ${{ secrets.GOOGLE_SHEET_CSV_URL }}
+          GOOGLE_SHEET_ID:             ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_NAME:           ${{ secrets.GOOGLE_SHEET_NAME }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           NODE_ENV: production
         run: node scripts/digest.js
 
-      - name: Upload digest log as artifact
+      - name: Upload digest artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: digest-log-${{ github.run_id }}
+          name: digest-${{ github.run_id }}
           path: server/digest-output.json
           retention-days: 30
           if-no-files-found: ignore

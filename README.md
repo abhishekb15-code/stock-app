@@ -1,87 +1,60 @@
-# Stock Intelligence & Portfolio Analyzer
+# 📈 Stock Intelligence — Indian Portfolio Analyzer
 
-A full-stack Indian stock market analysis app with live NSE quotes, technical indicators, portfolio P&L, recommendations, and daily email digests.
+Live NSE portfolio tracker with daily AI-powered email digest.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/abhishekb15-code/stock-app)
+
+---
 
 ## Features
 
-- Deep stock analysis: RSI, MACD, Bollinger Bands, EMA 20/50/200, SMA 20/50, support, and resistance
-- Live NSE market data via `yahoo-finance2`
-- NSE symbol defaults: `RELIANCE`, `TCS`, and `INFY` become `RELIANCE.NS`, `TCS.NS`, and `INFY.NS`
-- Portfolio tracker with buy price, current price, P&L, P&L %, and sector allocation
-- Recommendation generation from real technical indicators and Yahoo Finance valuation data when available
-- Daily email digest with live portfolio analysis
+- **Live NSE prices** via Twelve Data & Yahoo Finance
+- **Daily 7am GST digest** via GitHub Actions — beautiful HTML email
+- **AI portfolio analysis** via Claude (Anthropic API)
+- **Google Drive sync** — auto-pulls from your Equity sheet
+- **Whale & institutional signals**
+- **One-click local run** via `start.bat`
 
-## Quick Start
+---
 
-```bash
-npm run install:all
-npm run dev
-```
+## Quick Start (Local)
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:5000
-- Health check: http://localhost:5000/api/health
+Double-click `start.bat` — opens at http://localhost:5000
 
-No market data API key is required. Yahoo Finance availability and rate limits still apply.
+---
 
-## API Reference
+## Deploy to Render (Free, Hosted)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Server status |
-| GET | `/api/stock/:ticker` | Full live analysis for an NSE stock |
-| GET | `/api/stock/:ticker/technical` | Technical indicators and chart data |
-| GET | `/api/stock/:ticker/fundamental` | Yahoo Finance fundamentals and valuation |
-| GET | `/api/portfolio` | Holdings with live P&L and indicators |
-| POST | `/api/portfolio` | Add holding `{ ticker, shares, avgBuyPrice }` |
-| PUT | `/api/portfolio/:id` | Update holding |
-| DELETE | `/api/portfolio/:id` | Remove holding |
-| GET | `/api/whales` | Manually added institutional signals |
-| GET | `/api/recommendations` | Buy/Hold/Sell recommendations for portfolio |
-| POST | `/api/email/trigger` | Manually run daily digest |
+1. Click **Deploy to Render** above
+2. Connect your GitHub account
+3. Add environment variables in Render dashboard
+4. Live in ~2 minutes at `https://your-app.onrender.com`
 
-## Project Structure
+---
 
-```text
-stock-app/
-  server/
-    index.js
-    routes/
-      stocks.js
-      portfolio.js
-      whales.js
-      email.js
-      recommendations.js
-    services/
-      indianMarketData.js
-      emailService.js
-    models/
-      db.js
-    jobs/
-      scheduler.js
-  client/
-    src/
-      App.js
-      pages/
-        Dashboard.js
-        Portfolio.js
-        StockDeepDive.js
-        WhaleSignals.js
-      components/
-        layout/Sidebar.js
-```
+## Environment Variables
 
-## Email Setup
+| Variable | Required | Description |
+|---|---|---|
+| `GMAIL_USER` | ✅ | Your Gmail address |
+| `GMAIL_APP_PASSWORD` | ✅ | Gmail App Password |
+| `EMAIL_RECIPIENT` | ✅ | Digest recipient email |
+| `TWELVE_DATA_API_KEY` | ✅ | Free at twelvedata.com |
+| `ANTHROPIC_API_KEY` | ✅ | From console.anthropic.com |
+| `GOOGLE_SHEET_CSV_URL` | ⚡ | Public CSV export of your Equity sheet |
+| `RENDER_DEPLOY_HOOK` | ⚡ | Auto-deploy on push (from Render dashboard) |
 
-Add these values to `server/.env` to enable Gmail digests:
+### Get GOOGLE_SHEET_CSV_URL
+1. Open Equity sheet → File → Share → Anyone with link (Viewer)
+2. File → Export → CSV → copy the URL
+3. Replace `/edit` with `/export?format=csv`
 
-```env
-GMAIL_USER=your_email@gmail.com
-GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
-EMAIL_RECIPIENT=recipient@gmail.com
-PORT=5000
-```
+---
 
-## Database Note
+## GitHub Actions
 
-The app currently uses an in-memory development store for holdings and manually added signals. Replace `server/models/db.js` with persistent SQL queries when moving to production.
+| Workflow | Trigger |
+|---|---|
+| 📈 Daily Morning Digest | 7:00 AM GST, Mon–Fri |
+| 🚀 Deploy to Render | Every push to main |
+| 🌐 Open App in Browser | Manual |

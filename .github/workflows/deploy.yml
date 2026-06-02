@@ -1,0 +1,48 @@
+name: 🚀 Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Trigger Render Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build check — install & build frontend
+        run: |
+          cd client && npm install && CI=false npm run build
+          echo "✅ Build passed"
+
+      - name: Trigger Render deploy hook
+        if: env.RENDER_DEPLOY_HOOK != ''
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          curl -s -X POST "$RENDER_DEPLOY_HOOK" | python3 -c "
+          import sys, json
+          try:
+            d = json.load(sys.stdin)
+            print('✅ Render deploy triggered:', d.get('deploy', {}).get('id', 'unknown'))
+          except:
+            print('✅ Render deploy triggered')
+          "
+
+      - name: Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## 🚀 Deploy triggered
+
+          | | |
+          |---|---|
+          | **Branch** | main |
+          | **Status** | Deploying to Render |
+          | **Dashboard** | https://dashboard.render.com |
+
+          Your app will be live in ~2 minutes at your Render URL.
+          EOF

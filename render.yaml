@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: stock-intelligence
+    runtime: node
+    region: singapore   # closest to Dubai/India
+    plan: free
+    rootDir: .
+    buildCommand: cd client && npm install && npm run build && cd ../server && npm install
+    startCommand: cd server && node index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: GMAIL_USER
+        sync: false        # set manually in Render dashboard
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: EMAIL_RECIPIENT
+        sync: false
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_SHEET_CSV_URL
+        sync: false
