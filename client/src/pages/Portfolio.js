@@ -6,58 +6,81 @@ import { Plus, Trash2, Download, X, ExternalLink, Upload, AlertCircle, RefreshCw
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signedMoney = (v) => `${v >= 0 ? '+' : '-'}${money(Math.abs(v))}`;
 
-function AddModal({ onClose, onAdd }) {
-  const [form, setForm] = useState({ ticker: '', shares: '', avgBuyPrice: '', purchaseDate: '', notes: '' });
+function AddModal({ onClose, onSave }) {
+  const [form, setForm]     = useState({ ticker: '', shares: '', avgBuyPrice: '', purchaseDate: '', notes: '' });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError]   = useState('');
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const set = (key) => (e) => { setError(''); setForm(p => ({ ...p, [key]: e.target.value })); };
+
+  const handleSubmit = async () => {
+    if (!form.ticker.trim())                                      return setError('Ticker symbol is required');
+    if (!form.shares || isNaN(+form.shares) || +form.shares <= 0) return setError('Enter a valid number of shares');
+    if (!form.avgBuyPrice || isNaN(+form.avgBuyPrice) || +form.avgBuyPrice <= 0) return setError('Enter a valid buy price');
+
     setLoading(true); setError('');
     try {
-      const res = await axios.post('/api/portfolio', form);
-      onAdd(res.data); onClose();
+      await axios.post('/api/portfolio', {
+        ticker:       form.ticker.trim().toUpperCase(),
+        shares:       +form.shares,
+        avgBuyPrice:  +form.avgBuyPrice,
+        purchaseDate: form.purchaseDate || new Date().toISOString().split('T')[0],
+        notes:        form.notes,
+      });
+      onClose();
+      onSave();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to add holding');
-    } finally { setLoading(false); }
+      setError(err.response?.data?.error || 'Failed to add. Is the server running?');
+      setLoading(false);
+    }
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-      <div className="card" style={{ width: 440, padding: 28 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-          <span style={{ fontWeight: 700, fontSize: 16 }}>Add Holding</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={18} /></button>
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+    >
+      <div className="card" style={{ width: 460, padding: 28 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <span style={{ fontWeight: 700, fontSize: 17, color: 'var(--text-primary)' }}>Add Holding</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 22 }}>×</button>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {[
-              { label: 'NSE Symbol', key: 'ticker', placeholder: 'RELIANCE' },
-              { label: 'Shares', key: 'shares', placeholder: '10', type: 'number' },
-              { label: 'Buy Price (₹)', key: 'avgBuyPrice', placeholder: '2850.00', type: 'number' },
-              { label: 'Purchase Date', key: 'purchaseDate', type: 'date' },
-            ].map(({ label, key, placeholder, type = 'text' }) => (
-              <div key={key}>
-                <label className="label">{label}</label>
-                <input className="input" type={type} placeholder={placeholder}
-                  value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                  required={key !== 'purchaseDate'} />
-              </div>
-            ))}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div style={{ gridColumn: '1/-1' }}>
+            <label className="label">NSE Symbol *</label>
+            <input className="input" placeholder="e.g. RELIANCE" value={form.ticker} onChange={set('ticker')} style={{ width: '100%', boxSizing: 'border-box', textTransform: 'uppercase' }} />
           </div>
-          <div style={{ marginTop: 14 }}>
-            <label className="label">Notes (optional)</label>
-            <input className="input" placeholder="Long term hold..." value={form.notes}
-              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <div>
+            <label className="label">Shares *</label>
+            <input className="input" type="number" min="1" step="1" placeholder="100" value={form.shares} onChange={set('shares')} style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
-          {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{error}</div>}
-          <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-            <button type="submit" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={loading}>
-              {loading ? 'Adding...' : 'Add Holding'}
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <div>
+            <label className="label">Buy Price (₹) *</label>
+            <input className="input" type="number" min="0" step="0.01" placeholder="2850.00" value={form.avgBuyPrice} onChange={set('avgBuyPrice')} style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
-        </form>
+          <div>
+            <label className="label">Purchase Date</label>
+            <input className="input" type="date" value={form.purchaseDate} onChange={set('purchaseDate')} style={{ width: '100%', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label className="label">Notes</label>
+            <input className="input" placeholder="Long term hold..." value={form.notes} onChange={set('notes')} style={{ width: '100%', boxSizing: 'border-box' }} />
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 14, padding: '10px 14px', background: '#2d0a0a', border: '1px solid #7f1d1d', borderRadius: 6, color: '#f87171', fontSize: 13 }}>
+            ⚠️ {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button onClick={handleSubmit} disabled={loading} className="btn btn-primary" style={{ flex: 1, justifyContent: 'center', opacity: loading ? 0.7 : 1 }}>
+            {loading ? '⏳ Adding...' : '✓ Add Holding'}
+          </button>
+          <button onClick={onClose} className="btn btn-ghost" disabled={loading}>Cancel</button>
+        </div>
       </div>
     </div>
   );
@@ -239,7 +262,7 @@ export default function Portfolio() {
         </div>
       </div>
 
-      {showModal && <AddModal onClose={() => setShowModal(false)} onAdd={() => { setShowModal(false); load(); }} />}
+      {showModal && <AddModal onClose={() => setShowModal(false)} onSave={load} />}
     </div>
   );
 }
