@@ -184,3 +184,18 @@ async function syncPortfolio() {
 }
 
 module.exports = { syncPortfolio };
+
+// Ticker corrections — some Drive sheet codes differ from official NSE symbols
+const TICKER_CORRECTIONS = {
+  'WEBELSOLAR': 'WEBSOL',
+  'WEBEL':      'WEBSOL',
+  'UTKARSHBNK': 'UTKARSHBNK', // confirmed correct
+  'AEROENTER':  'AEROENTER',  // confirmed correct
+};
+
+function correctTicker(symbol) {
+  const upper = symbol.toUpperCase().replace('.NS','').replace('.BO','');
+  return TICKER_CORRECTIONS[upper] || upper;
+}
+
+module.exports.correctTicker = correctTicker;

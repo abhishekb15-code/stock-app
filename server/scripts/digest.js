@@ -12,7 +12,7 @@ const signedMoney = (v) => `${v>=0?'+':'-'}${money(Math.abs(v))}`;
 // Live data from Google Drive Equity sheet (auto-updated)
 const HOLDINGS = [
   { ticker:'OIL.NS',        shares:4500,   avgBuyPrice:245.54,  name:'Oil India Ltd' },
-  { ticker:'WEBELSOLAR.NS', shares:18000,  avgBuyPrice:40.25,   name:'Webel Solar' },
+  { ticker:'WEBSOL.NS', shares:18000,  avgBuyPrice:40.25,   name:'Webel Solar' },
   { ticker:'STEELCAS.NS',   shares:4950,   avgBuyPrice:131.00,  name:'Steelcast Ltd' },
   { ticker:'NATCOPHARM.NS', shares:990,    avgBuyPrice:1142.00, name:'Natco Pharma' },
   { ticker:'RISHABH.NS',    shares:2430,   avgBuyPrice:437.20,  name:'Rishabh Instruments' },
