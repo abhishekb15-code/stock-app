@@ -11,6 +11,7 @@ const portfolioRoutes = require('./routes/portfolio');
 const whaleRoutes = require('./routes/whales');
 const { router: emailRoutes } = require('./routes/email');
 const recommendationRoutes = require('./routes/recommendations');
+const analysisRoutes = require('./routes/analysis');
 
 const { initScheduler } = require('./jobs/scheduler');
 
@@ -40,6 +41,7 @@ app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/whales', whaleRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/analysis', analysisRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
