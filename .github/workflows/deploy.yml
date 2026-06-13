@@ -7,42 +7,46 @@ on:
 
 jobs:
   deploy:
-    name: Trigger Render Deploy
+    name: Build & Deploy
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build check — install & build frontend
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install & build frontend
         run: |
           cd client && npm install && CI=false npm run build
-          echo "✅ Build passed"
+          echo "✅ Frontend built successfully"
 
-      - name: Trigger Render deploy hook
-        if: env.RENDER_DEPLOY_HOOK != ''
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      - name: Install server deps & syntax check
         run: |
-          curl -s -X POST "$RENDER_DEPLOY_HOOK" | python3 -c "
-          import sys, json
-          try:
-            d = json.load(sys.stdin)
-            print('✅ Render deploy triggered:', d.get('deploy', {}).get('id', 'unknown'))
-          except:
-            print('✅ Render deploy triggered')
-          "
+          cd server && npm install
+          node --check index.js
+          node --check models/db.js
+          node --check services/analysisEngine.js
+          echo "✅ Server syntax OK"
+
+      - name: Trigger Render deploy
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        run: |
+          RESPONSE=$(curl -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}")
+          echo "Render response: $RESPONSE"
+          echo "✅ Deploy triggered"
 
       - name: Summary
         run: |
           cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-          ## 🚀 Deploy triggered
+          ## 🚀 Deployed to Render
 
           | | |
           |---|---|
-          | **Branch** | main |
-          | **Status** | Deploying to Render |
+          | **Status** | ✅ Deploy triggered |
           | **Dashboard** | https://dashboard.render.com |
-
-          Your app will be live in ~2 minutes at your Render URL.
+          | **Live in** | ~2 minutes |
           EOF
