@@ -2,18 +2,13 @@
   "name": "stock-intelligence-app",
   "version": "1.0.0",
   "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=9.0.0"
+    "node": "20.x"
   },
   "scripts": {
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && npm run dev",
-    "client": "cd client && npm start",
-    "build": "cd client && npm run build",
-    "build:render": "cd client && npm install && npm run build && cd ../server && npm install",
-    "start": "cd server && node index.js",
-    "start:full": "npm run build && npm start",
-    "setup": "npm install && cd server && npm install && cd ../client && npm install"
+    "build": "cd client && npm install && npm run build && cd ../server && npm install",
+    "start": "node server/index.js",
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm start\"",
+    "setup": "cd server && npm install && cd ../client && npm install"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"
