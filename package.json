@@ -8,7 +8,10 @@
     "build": "cd client && npm install && npm run build && cd ../server && npm install",
     "start": "node server/index.js",
     "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm start\"",
-    "setup": "cd server && npm install && cd ../client && npm install"
+    "setup": "cd server && npm install && cd ../client && npm install",
+    "website": "cd website && npm run dev",
+    "website:build": "cd website && npm run build",
+    "website:start": "cd website && npm run start"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"

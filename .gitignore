@@ -3,6 +3,7 @@ client/node_modules/
 server/node_modules/
 
 client/build/
+website/.next/
 server/*.log
 *.log
 server/data/

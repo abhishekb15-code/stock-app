@@ -47,9 +47,9 @@ async function earningsAnalysis(ticker) {
       surprise:    e.surprise,
     }));
 
-    // Annual income statements
+    // Annual income statements (s.date is already a fiscal year number)
     const annualStatements = income.annual.map(s => ({
-      date:            s.date ? new Date(s.date).getFullYear() : s.date,
+      date:            s.date,
       revenue:         s.revenue,
       grossProfit:     s.grossProfit,
       operatingIncome: s.operatingIncome,
@@ -75,11 +75,12 @@ async function earningsAnalysis(ticker) {
     const signals = [];
     if (revenueGrowth > 15) signals.push({type:'bullish', msg:`Revenue grew ${revenueGrowth.toFixed(1)}% YoY — strong momentum`});
     if (revenueGrowth < 0)  signals.push({type:'bearish', msg:`Revenue declined ${Math.abs(revenueGrowth).toFixed(1)}% YoY`});
-    const beats = epsHistory.filter(e=>e.surprise>0).length;
-    if (epsHistory.length > 0) {
-      const rate = (beats/epsHistory.length)*100;
-      if (rate>=75) signals.push({type:'bullish', msg:`Beat EPS estimates ${beats}/${epsHistory.length} quarters (${rate.toFixed(0)}%)`});
-      if (rate<50)  signals.push({type:'bearish', msg:`Missed EPS ${epsHistory.length-beats}/${epsHistory.length} quarters`});
+    const withSurprise = epsHistory.filter(e=>e.surprise!=null);
+    const beats = withSurprise.filter(e=>e.surprise>0).length;
+    if (withSurprise.length > 0) {
+      const rate = (beats/withSurprise.length)*100;
+      if (rate>=75) signals.push({type:'bullish', msg:`Beat EPS estimates ${beats}/${withSurprise.length} quarters (${rate.toFixed(0)}%)`});
+      if (rate<50)  signals.push({type:'bearish', msg:`Missed EPS ${withSurprise.length-beats}/${withSurprise.length} quarters`});
     }
     if (fund.netMargin > 15) signals.push({type:'bullish', msg:`Net margin ${fund.netMargin.toFixed(1)}% — strong profitability`});
     if (fund.netMargin > 0 && fund.netMargin < 3) signals.push({type:'caution', msg:`Net margin ${fund.netMargin.toFixed(1)}% — thin`});
@@ -272,66 +273,67 @@ async function fullStockAnalysis(ticker) {
 }
 
 // ── Module 6: Portfolio Client Report ──────────────────────────────────────────
+
+// Run an async fn over items with bounded concurrency (keeps the report fast
+// without hammering Yahoo — avoids the all-24-holdings timeout).
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const idx = next++;
+      try { out[idx] = await fn(items[idx], idx); }
+      catch { out[idx] = null; }
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// 5-min cache so re-opening the Report tab is instant.
+let _reportCache = { key: null, ts: 0, data: null };
+const REPORT_TTL = 5 * 60 * 1000;
+
 async function clientReport(holdings) {
-  // Process in batches of 3 to avoid API rate limits
-  const results = [];
-  for (let i=0; i<holdings.length; i+=3) {
-    const batch = holdings.slice(i,i+3);
-    const batchResults = await Promise.all(batch.map(async h => {
-      try {
-        const [tech, fund, earn] = await Promise.allSettled([
-          getStockAnalysis(h.ticker),
-          getFundamentals(h.ticker),
-          earningsAnalysis(h.ticker),
-        ]);
-        const t = tech.status==='fulfilled'  ? tech.value  : null;
-        const f = fund.status==='fulfilled'  ? fund.value  : null;
-        const e = earn.status==='fulfilled'  ? earn.value  : null;
-
-        const currentPrice = t?.price ?? h.avgBuyPrice;
-        const pnl          = (currentPrice-h.avgBuyPrice)*h.shares;
-        const pnlPct       = ((currentPrice-h.avgBuyPrice)/h.avgBuyPrice)*100;
-        const score        = scoreHolding(t,f,e,pnlPct);
-        const recommendation = scoreToRecommendation(score, pnlPct, f);
-
-        return {
-          ticker:h.ticker, displayTicker:h.ticker.replace('.NS','').replace('.BO',''),
-          name:   f?.name || h.notes || h.ticker,
-          sector: f?.sector || 'Unknown',
-          shares:h.shares, avgBuyPrice:h.avgBuyPrice,
-          currentPrice, pnl:round(pnl,2), pnlPct:round(pnlPct,2),
-          totalValue:round(currentPrice*h.shares,2),
-          score, recommendation,
-          keyMetrics:{
-            pe:           f?.fundamentals?.peRatio,
-            roe:          f?.fundamentals?.roe,
-            revenueGrowth:f?.fundamentals?.revenueGrowth,
-            netMargin:    f?.fundamentals?.profitMargin,
-            debtToEquity: f?.fundamentals?.debtToEquity,
-            upside:       f?.valuation?.upside,
-            rsi:          t?.technical?.rsi?.value,
-            macdSignal:   (t?.technical?.macd?.histogram||0)>0 ? 'bullish':'bearish',
-          },
-          earningsSignals: e?.signals || [],
-        };
-      } catch(err) {
-        const currentPrice = h.avgBuyPrice;
-        const pnlPct = 0;
-        return {
-          ticker:h.ticker, displayTicker:h.ticker.replace('.NS','').replace('.BO',''),
-          error:err.message,
-          name:h.notes||h.ticker, sector:'Unknown',
-          shares:h.shares, avgBuyPrice:h.avgBuyPrice, currentPrice,
-          pnl:0, pnlPct:0, totalValue:round(currentPrice*h.shares,2),
-          score:50, recommendation:{action:'HOLD',bucket:'monitor',reasons:[{type:'neutral',text:'Data temporarily unavailable'}],score:50},
-          keyMetrics:{}, earningsSignals:[],
-        };
-      }
-    }));
-    results.push(...batchResults);
-    // Small delay between batches to respect API rate limits
-    if (i+3 < holdings.length) await new Promise(r=>setTimeout(r,500));
+  const cacheKey = holdings.map(h => `${h.ticker}:${h.shares}:${h.avgBuyPrice}`).join('|');
+  if (_reportCache.data && _reportCache.key === cacheKey && (Date.now() - _reportCache.ts) < REPORT_TTL) {
+    return _reportCache.data;
   }
+
+  // One batched price fetch for all holdings (shared cache), then fundamentals
+  // with bounded concurrency. No per-holding OHLCV — scoring uses fundamentals,
+  // valuation and P&L, which keeps the request well under the timeout.
+  const priceMap = await mds.getCachedBatchPrices(holdings.map(h => h.ticker)).catch(() => ({}));
+  const funds    = await mapLimit(holdings, 6, h => getFundamentals(h.ticker));
+
+  const results = holdings.map((h, idx) => {
+    const f = funds[idx];
+    const currentPrice = priceMap[h.ticker] || f?.valuation?.currentPrice || h.avgBuyPrice;
+    const pnl          = (currentPrice - h.avgBuyPrice) * h.shares;
+    const pnlPct       = ((currentPrice - h.avgBuyPrice) / h.avgBuyPrice) * 100;
+    const score        = scoreHolding(null, f, null, pnlPct);
+    const recommendation = scoreToRecommendation(score, pnlPct, f);
+
+    return {
+      ticker: h.ticker, displayTicker: h.ticker.replace('.NS','').replace('.BO',''),
+      name:   f?.name || h.notes || h.ticker,
+      sector: f?.sector || 'Unknown',
+      shares: h.shares, avgBuyPrice: h.avgBuyPrice,
+      currentPrice: round(currentPrice,2), pnl: round(pnl,2), pnlPct: round(pnlPct,2),
+      totalValue: round(currentPrice * h.shares, 2),
+      score, recommendation,
+      keyMetrics: {
+        pe:           f?.fundamentals?.peRatio,
+        roe:          f?.fundamentals?.roe,
+        revenueGrowth:f?.fundamentals?.revenueGrowth,
+        netMargin:    f?.fundamentals?.profitMargin,
+        debtToEquity: f?.fundamentals?.debtToEquity,
+        upside:       f?.valuation?.upside,
+      },
+      earningsSignals: [],
+      dataAvailable:   !!f,
+    };
+  });
 
   const totalValue = results.reduce((s,r)=>s+(r.totalValue||0),0);
   const totalCost  = holdings.reduce((s,h)=>s+h.avgBuyPrice*h.shares,0);
@@ -352,16 +354,16 @@ async function clientReport(holdings) {
   const sellCount = results.filter(r=>r.recommendation?.bucket==='sell').length;
   if(sellCount) portfolioActions.push({type:'action',msg:`${sellCount} position(s) flagged SELL — review and redeploy`});
 
-  return {
+  const report = {
     module:'client_report', generatedAt:new Date().toISOString(),
     holdings: results,
     summary:{
       totalValue:round(totalValue,2), totalCost:round(totalCost,2),
       totalPnl:round(totalPnl,2),
-      totalPnlPct:round((totalPnl/totalCost)*100,2),
+      totalPnlPct:totalCost?round((totalPnl/totalCost)*100,2):0,
       holdingCount:holdings.length,
       sectorAllocation:Object.entries(sectorAlloc)
-        .map(([sector,value])=>({sector,value:round(value,2),pct:round((value/totalValue)*100,1)}))
+        .map(([sector,value])=>({sector,value:round(value,2),pct:totalValue?round((value/totalValue)*100,1):0}))
         .sort((a,b)=>b.value-a.value),
     },
     buckets:{
@@ -371,6 +373,9 @@ async function clientReport(holdings) {
     },
     portfolioActions,
   };
+
+  _reportCache = { key: cacheKey, ts: Date.now(), data: report };
+  return report;
 }
 
 function scoreHolding(t,f,e,pnlPct) {

@@ -1,7 +1,17 @@
 /**
  * marketDataService.js
- * Yahoo Finance v8 for prices (no crumb needed)
- * Yahoo Finance v10 for fundamentals (needs crumb — fetched automatically)
+ *
+ * Yahoo Finance data layer that works on cloud hosts (Render) where the
+ * authenticated v10/v7 endpoints are blocked.
+ *
+ *  - Prices + OHLCV      → v8 chart endpoint        (no crumb, works everywhere)
+ *  - Financial statements → ws/fundamentals-timeseries (no crumb, works everywhere)
+ *  - Sector / industry / analyst target → v10 quoteSummary (needs crumb — BEST EFFORT
+ *    only; gracefully degrades to a static sector map when the crumb is unavailable,
+ *    e.g. on Render's datacenter IPs).
+ *
+ * A single per-ticker quote cache is shared by the Portfolio batch path and the
+ * single-stock (StockDeepDive) path so prices are always consistent across pages.
  */
 
 const https = require('https');
@@ -15,8 +25,8 @@ function r(v, d = 2) {
 
 // ── Ticker corrections ─────────────────────────────────────────────────────────
 const TICKER_MAP = {
-  'WEBSOL.NS':     'WEBELSOLAR.NS',   // NSE renamed
-  'WEBELSOL.NS':   'WEBELSOLAR.NS',
+  'WEBSOL.NS':   'WEBELSOLAR.NS',   // NSE renamed
+  'WEBELSOL.NS': 'WEBELSOLAR.NS',
 };
 function correctTicker(ticker) {
   return TICKER_MAP[ticker.toUpperCase()] || ticker;
@@ -27,22 +37,51 @@ function tdSymbol(ticker) {
   return `${ticker.replace('.NS','')}:NSE`;
 }
 
-// ── HTTP helper ────────────────────────────────────────────────────────────────
-function httpGet(url, headers = {}) {
+// ── Static sector map ──────────────────────────────────────────────────────────
+// assetProfile (sector/industry) needs a crumb and is blocked on Render, so we
+// resolve sector from this map first. Covers the portfolio + the reference peers
+// used by the competitive / sector tabs. Falls back to a best-effort crumb lookup,
+// then 'Unknown'.
+const TICKER_SECTOR = {
+  // Portfolio holdings
+  'OIL.NS':'Energy', 'STEELCAS.NS':'Industrials', 'NATCOPHARM.NS':'Healthcare',
+  'RISHABH.NS':'Industrials', 'PTC.NS':'Utilities', 'JGCHEM.NS':'Basic Materials',
+  'IREDA.NS':'Financial Services', 'GMDCLTD.NS':'Basic Materials', 'MSTCLTD.NS':'Industrials',
+  'UJJIVANSFB.NS':'Financial Services', 'AEROENTER.NS':'Industrials', 'HUDCO.NS':'Financial Services',
+  'GNA.NS':'Consumer Cyclical', 'UNIMECH.NS':'Industrials', 'LIKHITHA.NS':'Industrials',
+  'IRCON.NS':'Industrials', 'PROTEAN.NS':'Technology', 'VIKASLIFE.NS':'Basic Materials',
+  'UTKARSHBNK.NS':'Financial Services', 'WEBELSOLAR.NS':'Industrials',
+  // Reference large-caps (peers)
+  'RELIANCE.NS':'Energy', 'ONGC.NS':'Energy', 'BPCL.NS':'Energy', 'IOC.NS':'Energy',
+  'TCS.NS':'Technology', 'INFY.NS':'Technology', 'WIPRO.NS':'Technology', 'HCLTECH.NS':'Technology',
+  'HDFCBANK.NS':'Financial Services', 'ICICIBANK.NS':'Financial Services',
+  'KOTAKBANK.NS':'Financial Services', 'SBIN.NS':'Financial Services',
+  'JSWSTEEL.NS':'Basic Materials', 'TATASTEEL.NS':'Basic Materials',
+  'HINDALCO.NS':'Basic Materials', 'SAIL.NS':'Basic Materials',
+  'LT.NS':'Industrials', 'SIEMENS.NS':'Industrials', 'ABB.NS':'Industrials', 'BEL.NS':'Industrials',
+  'SUNPHARMA.NS':'Healthcare', 'DRREDDY.NS':'Healthcare', 'CIPLA.NS':'Healthcare', 'DIVISLAB.NS':'Healthcare',
+  'POWERGRID.NS':'Utilities', 'NTPC.NS':'Utilities', 'TATAPOWER.NS':'Utilities',
+};
+function sectorFor(ticker) {
+  return TICKER_SECTOR[correctTicker(ticker).toUpperCase()] || null;
+}
+
+// ── HTTP helper ──────────────────────────────────────────────────────────────
+function httpGet(url, headers = {}, timeout = 15000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
-        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept':          'application/json,text/plain,*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Origin':          'https://finance.yahoo.com',
         'Referer':         'https://finance.yahoo.com/',
         ...headers,
       },
-      timeout: 15000,
+      timeout,
     }, res => {
       if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location)
-        return httpGet(res.headers.location, headers).then(resolve).catch(reject);
+        return httpGet(res.headers.location, headers, timeout).then(resolve).catch(reject);
       let data = '';
       res.on('data', d => data += d);
       res.on('end', () => resolve({ status: res.statusCode, body: data, headers: res.headers }));
@@ -52,49 +91,62 @@ function httpGet(url, headers = {}) {
   });
 }
 
-// ── Crumb management (needed for v10 quoteSummary) ─────────────────────────────
-let _crumb  = null;
-let _cookie = null;
-let _crumbTs = 0;
-const CRUMB_TTL = 30 * 60 * 1000; // 30 minutes
+// ── Crumb management (v10 quoteSummary — BEST EFFORT, may be blocked on cloud) ──
+let _crumb = null, _cookie = null, _crumbTs = 0;
+let _crumbBlockedUntil = 0;                 // backoff after a failure (avoids slow retries)
+let _crumbInflight = null;                  // shared promise so concurrent callers don't stampede
+const CRUMB_TTL = 30 * 60 * 1000;           // 30 min
+const CRUMB_BLOCK_TTL = 10 * 60 * 1000;     // don't retry a failing crumb for 10 min
 
-async function getCrumb() {
-  if (_crumb && _cookie && (Date.now() - _crumbTs) < CRUMB_TTL) {
-    return { crumb: _crumb, cookie: _cookie };
-  }
-
-  // Step 1: Get cookies from Yahoo Finance
-  const cookieRes = await httpGet('https://fc.yahoo.com', {});
-  const setCookie = cookieRes.headers['set-cookie'] || [];
-  _cookie = setCookie.map(c => c.split(';')[0]).join('; ');
-
-  // Step 2: Get crumb
-  const crumbRes = await httpGet('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-    'Cookie': _cookie,
-  });
-
-  if (crumbRes.status === 200 && crumbRes.body && crumbRes.body !== 'null') {
-    _crumb  = crumbRes.body.trim();
-    _crumbTs = Date.now();
-    console.log('✅ Yahoo crumb obtained');
-    return { crumb: _crumb, cookie: _cookie };
-  }
-
-  // Fallback: try alternate crumb endpoint
-  const altRes = await httpGet('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-    'Cookie': _cookie,
-  });
-  if (altRes.status === 200 && altRes.body && altRes.body !== 'null') {
-    _crumb  = altRes.body.trim();
-    _crumbTs = Date.now();
-    console.log('✅ Yahoo crumb obtained (alt)');
-    return { crumb: _crumb, cookie: _cookie };
-  }
-
-  throw new Error('Could not obtain Yahoo crumb');
+function getCrumb() {
+  if (_crumb && _cookie && (Date.now() - _crumbTs) < CRUMB_TTL)
+    return Promise.resolve({ crumb: _crumb, cookie: _cookie });
+  if (Date.now() < _crumbBlockedUntil)
+    return Promise.reject(new Error('Yahoo crumb temporarily unavailable (backoff)'));
+  if (_crumbInflight) return _crumbInflight;
+  _crumbInflight = _acquireCrumb().finally(() => { _crumbInflight = null; });
+  return _crumbInflight;
 }
 
-// ── Yahoo v8 chart (no crumb needed — price + history) ────────────────────────
+async function _acquireCrumb() {
+  try {
+    // Get a session cookie (fc.yahoo.com works locally; finance.yahoo.com is a fallback)
+    let setCookie = (await httpGet('https://fc.yahoo.com', {}, 6000)).headers['set-cookie'] || [];
+    if (!setCookie.length)
+      setCookie = (await httpGet('https://finance.yahoo.com', {}, 6000)).headers['set-cookie'] || [];
+    _cookie = setCookie.map(c => c.split(';')[0]).join('; ');
+
+    for (const host of ['query1', 'query2']) {
+      const cr = await httpGet(`https://${host}.finance.yahoo.com/v1/test/getcrumb`, { 'Cookie': _cookie }, 6000);
+      if (cr.status === 200 && cr.body && cr.body !== 'null' && !cr.body.includes('<')) {
+        _crumb = cr.body.trim();
+        _crumbTs = Date.now();
+        return { crumb: _crumb, cookie: _cookie };
+      }
+    }
+    throw new Error('crumb endpoint returned no token');
+  } catch (err) {
+    _crumbBlockedUntil = Date.now() + CRUMB_BLOCK_TTL;
+    throw new Error(`Could not obtain Yahoo crumb: ${err.message}`);
+  }
+}
+
+async function fetchQuoteSummary(ticker, modules) {
+  const t = correctTicker(ticker);
+  const { crumb, cookie } = await getCrumb();
+  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(t)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`;
+  const res = await httpGet(url, { 'Cookie': cookie });
+  if (res.status === 401 || res.status === 403) {
+    _crumb = null; _crumbBlockedUntil = Date.now() + CRUMB_BLOCK_TTL; // crumb rejected — back off
+    throw new Error(`Yahoo v10 HTTP ${res.status} for ${t}`);
+  }
+  if (res.status !== 200) throw new Error(`Yahoo v10 HTTP ${res.status} for ${t}`);
+  const data = JSON.parse(res.body);
+  if (data?.quoteSummary?.error) throw new Error(data.quoteSummary.error.description);
+  return data?.quoteSummary?.result?.[0] || {};
+}
+
+// ── Yahoo v8 chart (price + meta, no crumb) ───────────────────────────────────
 async function fetchYahooChart(ticker) {
   const t   = correctTicker(ticker);
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?interval=1d&range=2d`;
@@ -120,46 +172,90 @@ async function fetchYahooChart(ticker) {
   };
 }
 
-// ── Yahoo v10 quoteSummary (needs crumb) ──────────────────────────────────────
-async function fetchQuoteSummary(ticker, modules) {
-  const t = correctTicker(ticker);
-  const { crumb, cookie } = await getCrumb();
-  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(t)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`;
-  const res = await httpGet(url, { 'Cookie': cookie });
-  if (res.status !== 200) throw new Error(`Yahoo v10 HTTP ${res.status} for ${t}`);
+// ── Fundamentals timeseries (no crumb — works on Render) ──────────────────────
+async function fetchFundamentalsTS(ticker, types) {
+  const t    = correctTicker(ticker);
+  const now  = Math.floor(Date.now() / 1000);
+  const past = now - 6 * 365 * 86400;
+  const url  = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(t)}`
+             + `?symbol=${encodeURIComponent(t)}&type=${types.join(',')}&period1=${past}&period2=${now}&merge=false`;
+  const res = await httpGet(url);
+  if (res.status !== 200) throw new Error(`timeseries HTTP ${res.status} for ${t}`);
   const data = JSON.parse(res.body);
-  if (data?.quoteSummary?.error) throw new Error(data.quoteSummary.error.description);
-  return data?.quoteSummary?.result?.[0] || {};
+  const out  = {};
+  for (const row of (data?.timeseries?.result || [])) {
+    const type = row.meta?.type?.[0];
+    if (!type) continue;
+    out[type] = (row[type] || [])
+      .filter(Boolean)
+      .map(v => ({ date: v.asOfDate, value: r(v.reportedValue?.raw, 4) }))
+      .filter(p => p.date && p.value != null)
+      .sort((a, b) => b.date.localeCompare(a.date));   // most recent first
+  }
+  return out;
+}
+const tsLatest = (ts, type) => ts[type]?.[0]?.value ?? null;
+const tsPrior  = (ts, type) => ts[type]?.[1]?.value ?? null;
+const tsSum    = (ts, type, n) => {
+  const a = (ts[type] || []).slice(0, n).map(p => p.value).filter(v => v != null);
+  return a.length === n ? a.reduce((x, y) => x + y, 0) : null;
+};
+
+// Merge several timeseries types into a date-keyed list (newest first).
+function mergeSeries(ts, fieldMap) {
+  const byDate = {};
+  for (const [out, type] of Object.entries(fieldMap)) {
+    for (const pt of (ts[type] || [])) {
+      (byDate[pt.date] ||= {})[out] = pt.value;
+    }
+  }
+  return Object.entries(byDate)
+    .map(([date, obj]) => ({ year: new Date(date).getFullYear(), ...obj }))
+    .sort((a, b) => b.year - a.year);
 }
 
-// ── Batch prices (Yahoo v8 — no crumb) ───────────────────────────────────────
+// ── Shared per-ticker quote cache ─────────────────────────────────────────────
+const quoteCache = new Map();           // ticker -> { data, ts }
+const QUOTE_TTL  = 5 * 60 * 1000;       // 5 min
+
+async function getQuoteRaw(ticker) {
+  const key = correctTicker(ticker);
+  const c   = quoteCache.get(key);
+  if (c && (Date.now() - c.ts) < QUOTE_TTL) return c.data;
+  const q = await fetchYahooChart(ticker);
+  quoteCache.set(key, { data: q, ts: Date.now() });
+  return q;
+}
+function cachedPrice(ticker) {
+  const c = quoteCache.get(correctTicker(ticker));
+  return c && (Date.now() - c.ts) < QUOTE_TTL ? c.data.price : null;
+}
+
+// ── Batch prices (shares the quote cache) ─────────────────────────────────────
 async function getBatchPrices(tickers) {
   if (!tickers.length) return {};
-  console.log(`💹 Fetching ${tickers.length} prices...`);
   const result = {};
-  const BATCH  = 5;
-  const DELAY  = 300;
-
+  const BATCH = 5, DELAY = 300;
   for (let i = 0; i < tickers.length; i += BATCH) {
-    const batch   = tickers.slice(i, i + BATCH);
-    const results = await Promise.allSettled(batch.map(t => fetchYahooChart(t)));
+    const batch = tickers.slice(i, i + BATCH);
+    const needNetwork = batch.some(t => cachedPrice(t) == null);
+    const results = await Promise.allSettled(batch.map(t => getQuoteRaw(t)));
     results.forEach((res, idx) => {
-      if (res.status === 'fulfilled') {
-        result[batch[idx]] = res.value.price;
-      } else {
-        console.warn(`⚠️  ${batch[idx]}: ${res.reason?.message}`);
-      }
+      if (res.status === 'fulfilled') result[batch[idx]] = res.value.price;
+      else console.warn(`⚠️  ${batch[idx]}: ${res.reason?.message}`);
     });
-    if (i + BATCH < tickers.length) await sleep(DELAY);
+    if (needNetwork && i + BATCH < tickers.length) await sleep(DELAY);
   }
-  console.log(`✅ Got ${Object.keys(result).length}/${tickers.length} prices`);
   return result;
 }
 
-// ── Single quote ──────────────────────────────────────────────────────────────
+async function getCachedBatchPrices(tickers) {
+  return getBatchPrices(tickers);   // per-ticker cache inside getQuoteRaw handles freshness
+}
+
+// ── Single quote ───────────────────────────────────────────────────────────────
 async function getQuote(ticker) {
-  const q = await fetchYahooChart(ticker);
-  const t = correctTicker(ticker);
+  const q = await getQuoteRaw(ticker);
   return {
     ticker, displayTicker: ticker.replace('.NS','').replace('.BO',''),
     name: q.name, exchange: q.exchange,
@@ -171,7 +267,7 @@ async function getQuote(ticker) {
   };
 }
 
-// ── Historical OHLCV ──────────────────────────────────────────────────────────
+// ── Historical OHLCV (v8) ──────────────────────────────────────────────────────
 async function getTimeSeries(ticker, outputsize = 300) {
   const t       = correctTicker(ticker);
   const period2 = Math.floor(Date.now() / 1000);
@@ -184,134 +280,192 @@ async function getTimeSeries(ticker, outputsize = 300) {
   if (!result) return [];
   const ts    = result.timestamp || [];
   const ohlcv = result.indicators?.quote?.[0] || {};
-  return ts.map((t, i) => ({
-    date:   new Date(t * 1000).toISOString().split('T')[0],
+  return ts.map((tt, i) => ({
+    date:   new Date(tt * 1000).toISOString().split('T')[0],
     open:   r(ohlcv.open?.[i]),   high:   r(ohlcv.high?.[i]),
     low:    r(ohlcv.low?.[i]),    close:  r(ohlcv.close?.[i]),
     volume: ohlcv.volume?.[i] || 0,
   })).filter(v => v.close > 0);
 }
 
-// ── Fundamentals (v10 with crumb) ─────────────────────────────────────────────
+// ── Best-effort sector/target enrichment via crumb (skipped if blocked) ───────
+async function enrichFromQuoteSummary(ticker) {
+  if (Date.now() < _crumbBlockedUntil) return {};
+  try {
+    const s   = await fetchQuoteSummary(ticker, 'assetProfile,financialData,defaultKeyStatistics,summaryDetail');
+    const safe = (v) => { const raw = v?.raw ?? v; return Number.isFinite(Number(raw)) ? Number(raw) : null; };
+    const pro = s.assetProfile || {}, fd = s.financialData || {}, ks = s.defaultKeyStatistics || {}, sd = s.summaryDetail || {};
+    return {
+      sector:        pro.sector || null,
+      industry:      pro.industry || null,
+      website:       pro.website || null,
+      description:   pro.longBusinessSummary || null,
+      targetPrice:   safe(fd.targetMeanPrice),
+      beta:          safe(ks.beta),
+      dividendYield: safe(sd.dividendYield) != null ? r(safe(sd.dividendYield) * 100) : null,
+      evEbitda:      safe(ks.enterpriseToEbitda),
+    };
+  } catch { return {}; }
+}
+
+// ── Fundamentals (timeseries-derived, with best-effort crumb enrichment) ──────
 async function getFundamentalsData(ticker) {
-  const safe = (v) => { const raw=v?.raw??v; return Number.isFinite(Number(raw))?Number(raw):null; };
-  try {
-    const s   = await fetchQuoteSummary(ticker, 'summaryDetail,defaultKeyStatistics,financialData,assetProfile');
-    const sd  = s.summaryDetail          || {};
-    const ks  = s.defaultKeyStatistics   || {};
-    const fd  = s.financialData          || {};
-    const pro = s.assetProfile           || {};
-    return {
-      name:           pro.longName || pro.shortName || ticker,
-      sector:         pro.sector   || 'Unknown',
-      industry:       pro.industry || 'Unknown',
-      description:    pro.longBusinessSummary || null,
-      website:        pro.website  || null,
-      peRatio:        r(safe(sd.trailingPE) ?? safe(ks.trailingPE)),
-      pbRatio:        r(safe(ks.priceToBook)),
-      psRatio:        r(safe(ks.priceToSalesTrailing12Months)),
-      evEbitda:       r(safe(ks.enterpriseToEbitda)),
-      eps:            r(safe(ks.trailingEps)),
-      revenueGrowth:  safe(fd.revenueGrowth)    != null ? r(safe(fd.revenueGrowth)*100)    : null,
-      grossMargin:    safe(fd.grossMargins)      != null ? r(safe(fd.grossMargins)*100)     : null,
-      operatingMargin:safe(fd.operatingMargins)  != null ? r(safe(fd.operatingMargins)*100) : null,
-      netMargin:      safe(fd.profitMargins)     != null ? r(safe(fd.profitMargins)*100)    : null,
-      roe:            safe(fd.returnOnEquity)    != null ? r(safe(fd.returnOnEquity)*100)   : null,
-      roa:            safe(fd.returnOnAssets)    != null ? r(safe(fd.returnOnAssets)*100)   : null,
-      debtToEquity:   r(safe(fd.debtToEquity)),
-      currentRatio:   r(safe(fd.currentRatio)),
-      freeCashFlow:   safe(fd.freeCashflow),
-      marketCap:      safe(ks.enterpriseValue) || safe(sd.marketCap),
-      beta:           r(safe(ks.beta)),
-      dividendYield:  safe(sd.dividendYield) != null ? r(safe(sd.dividendYield)*100) : null,
-      targetPrice:    r(safe(fd.targetMeanPrice)),
-    };
-  } catch (err) {
-    console.warn(`Fundamentals failed for ${ticker}: ${err.message}`);
-    return { name: ticker.replace('.NS','').replace('.BO',''), sector:'Unknown', industry:'Unknown' };
-  }
+  const display = correctTicker(ticker).replace('.NS','').replace('.BO','');
+  const TYPES = [
+    'annualTotalRevenue','annualGrossProfit','annualOperatingIncome','annualNetIncome',
+    'annualDilutedEPS','annualBasicEPS','annualStockholdersEquity','annualTotalAssets',
+    'annualTotalDebt','annualCurrentAssets','annualCurrentLiabilities','annualOrdinarySharesNumber',
+    'quarterlyTotalRevenue','quarterlyNetIncome','quarterlyDilutedEPS','quarterlyGrossProfit',
+  ];
+
+  let ts = {};
+  try { ts = await fetchFundamentalsTS(ticker, TYPES); }
+  catch (err) { console.warn(`Fundamentals TS failed for ${ticker}: ${err.message}`); }
+
+  const [price, enrich] = await Promise.all([
+    getQuoteRaw(ticker).then(q => q.price).catch(() => cachedPrice(ticker)),
+    enrichFromQuoteSummary(ticker),
+  ]);
+
+  const revenue   = tsLatest(ts, 'annualTotalRevenue');
+  const revPrev   = tsPrior(ts, 'annualTotalRevenue');
+  const netIncome = tsLatest(ts, 'annualNetIncome');
+  const grossProf = tsLatest(ts, 'annualGrossProfit');
+  const opIncome  = tsLatest(ts, 'annualOperatingIncome');
+  const equity    = tsLatest(ts, 'annualStockholdersEquity');
+  const assets    = tsLatest(ts, 'annualTotalAssets');
+  const totalDebt = tsLatest(ts, 'annualTotalDebt');
+  const curAssets = tsLatest(ts, 'annualCurrentAssets');
+  const curLiab   = tsLatest(ts, 'annualCurrentLiabilities');
+  const shares    = tsLatest(ts, 'annualOrdinarySharesNumber');
+
+  // Trailing EPS / margins from last 4 quarters when available, else annual
+  const ttmEps    = tsSum(ts, 'quarterlyDilutedEPS', 4) ?? tsLatest(ts, 'annualDilutedEPS') ?? tsLatest(ts, 'annualBasicEPS');
+  const ttmNet    = tsSum(ts, 'quarterlyNetIncome', 4) ?? netIncome;
+  const ttmRev    = tsSum(ts, 'quarterlyTotalRevenue', 4) ?? revenue;
+
+  const marketCap = price && shares ? price * shares : null;
+
+  const pct = (num, den) => (num != null && den) ? r((num / den) * 100) : null;
+
+  const data = {
+    name:            display,
+    sector:          enrich.sector || sectorFor(ticker) || 'Unknown',
+    industry:        enrich.industry || 'Unknown',
+    description:     enrich.description || null,
+    website:         enrich.website || null,
+    peRatio:         price != null && ttmEps ? r(price / ttmEps) : null,
+    pbRatio:         marketCap && equity  ? r(marketCap / equity)  : null,
+    psRatio:         marketCap && ttmRev  ? r(marketCap / ttmRev)  : null,
+    evEbitda:        enrich.evEbitda ?? null,
+    eps:             r(ttmEps),
+    revenueGrowth:   (revenue != null && revPrev) ? r(((revenue - revPrev) / Math.abs(revPrev)) * 100) : null,
+    grossMargin:     pct(grossProf, revenue),
+    operatingMargin: pct(opIncome, revenue),
+    netMargin:       pct(ttmNet, ttmRev),
+    roe:             pct(netIncome, equity),
+    roa:             pct(netIncome, assets),
+    debtToEquity:    (totalDebt != null && equity) ? r((totalDebt / equity) * 100) : null,
+    currentRatio:    (curAssets != null && curLiab) ? r(curAssets / curLiab) : null,
+    freeCashFlow:    null,
+    marketCap:       marketCap,
+    beta:            enrich.beta ?? null,
+    dividendYield:   enrich.dividendYield ?? null,
+    targetPrice:     enrich.targetPrice ?? null,
+  };
+  return data;
 }
 
-// ── Earnings (v10 with crumb) ─────────────────────────────────────────────────
+// ── Earnings (crumb earningsHistory → fallback to quarterly EPS actuals) ──────
 async function getEarnings(ticker) {
-  const safe = (v) => { const raw=v?.raw??v; return Number.isFinite(Number(raw))?Number(raw):null; };
-  try {
-    const s = await fetchQuoteSummary(ticker, 'earningsHistory,earningsTrend');
-    return (s.earningsHistory?.history || []).map(h => ({
-      date:        h.quarter?.fmt || new Date((h.quarter?.raw||0)*1000).toISOString().split('T')[0],
-      epsActual:   r(safe(h.epsActual)),
-      epsEstimate: r(safe(h.epsEstimate)),
-      surprise:    r(safe(h.surprisePercent)),
-    })).filter(h => h.date);
-  } catch { return []; }
-}
-
-// ── Income statement (v10 with crumb) ─────────────────────────────────────────
-async function getIncomeStatement(ticker) {
-  const safe = (v) => { const raw=v?.raw??v; return Number.isFinite(Number(raw))?Number(raw):null; };
-  try {
-    const s    = await fetchQuoteSummary(ticker, 'incomeStatementHistory,incomeStatementHistoryQuarterly');
-    const mapIS = items => (items||[]).map(i => ({
-      date:            new Date((i.endDate?.raw||0)*1000).getFullYear(),
-      revenue:         safe(i.totalRevenue),    grossProfit:     safe(i.grossProfit),
-      operatingIncome: safe(i.operatingIncome), netIncome:       safe(i.netIncome),
-      eps:             r(safe(i.basicEps ?? i.dilutedEps)),
-    })).filter(i => i.date);
-    return {
-      annual:    mapIS(s.incomeStatementHistory?.incomeStatementHistory),
-      quarterly: mapIS(s.incomeStatementHistoryQuarterly?.incomeStatementHistory),
-    };
-  } catch { return { annual:[], quarterly:[] }; }
-}
-
-// ── Balance sheet (v10 with crumb) ────────────────────────────────────────────
-async function getBalanceSheet(ticker) {
-  const safe = (v) => { const raw=v?.raw??v; return Number.isFinite(Number(raw))?Number(raw):null; };
-  try {
-    const s = await fetchQuoteSummary(ticker, 'balanceSheetHistory');
-    return (s.balanceSheetHistory?.balanceSheetStatements || []).map(b => ({
-      date:             new Date((b.endDate?.raw||0)*1000).getFullYear(),
-      totalAssets:      safe(b.totalAssets),    totalLiabilities: safe(b.totalLiab),
-      equity:           safe(b.totalStockholderEquity), cash: safe(b.cash),
-      currentRatio:     safe(b.totalCurrentAssets) && safe(b.totalCurrentLiabilities)
-                          ? r(safe(b.totalCurrentAssets)/safe(b.totalCurrentLiabilities)) : null,
-    })).filter(b => b.date);
-  } catch { return []; }
-}
-
-// ── Cash flow (v10 with crumb) ────────────────────────────────────────────────
-async function getCashFlow(ticker) {
-  const safe = (v) => { const raw=v?.raw??v; return Number.isFinite(Number(raw))?Number(raw):null; };
-  try {
-    const s = await fetchQuoteSummary(ticker, 'cashflowStatementHistory');
-    return (s.cashflowStatementHistory?.cashflowStatements || []).map(c => ({
-      date:          new Date((c.endDate?.raw||0)*1000).getFullYear(),
-      operatingCF:   safe(c.totalCashFromOperatingActivities),
-      capEx:         safe(c.capitalExpenditures),
-      freeCashFlow:  safe(c.totalCashFromOperatingActivities) != null
-                      ? safe(c.totalCashFromOperatingActivities) + (safe(c.capitalExpenditures)||0) : null,
-      dividendsPaid: safe(c.dividendsPaid),
-    })).filter(c => c.date);
-  } catch { return []; }
-}
-
-// ── Price cache (5 min TTL) ───────────────────────────────────────────────────
-const priceCache = { data:{}, ts:0 };
-const CACHE_TTL  = 5 * 60 * 1000;
-
-async function getCachedBatchPrices(tickers) {
-  const age = Date.now() - priceCache.ts;
-  if (age < CACHE_TTL && Object.keys(priceCache.data).length > 0) {
-    console.log(`📦 Cache hit (${Math.round(age/1000)}s old)`);
-    return priceCache.data;
+  const safe = (v) => { const raw = v?.raw ?? v; return Number.isFinite(Number(raw)) ? Number(raw) : null; };
+  if (Date.now() >= _crumbBlockedUntil) {
+    try {
+      const s = await fetchQuoteSummary(ticker, 'earningsHistory');
+      const hist = (s.earningsHistory?.history || []).map(h => ({
+        date:        h.quarter?.fmt || new Date((h.quarter?.raw || 0) * 1000).toISOString().split('T')[0],
+        epsActual:   r(safe(h.epsActual)),
+        epsEstimate: r(safe(h.epsEstimate)),
+        surprise:    safe(h.surprisePercent) != null ? r(safe(h.surprisePercent) * 100) : null,
+      })).filter(h => h.date && h.epsActual != null);
+      if (hist.length) return hist;
+    } catch { /* fall through */ }
   }
-  const fresh = await getBatchPrices(tickers);
-  if (Object.keys(fresh).length > 0) { priceCache.data = fresh; priceCache.ts = Date.now(); }
-  return fresh;
+  // Fallback: quarterly diluted EPS actuals (no estimate/surprise available)
+  try {
+    const ts = await fetchFundamentalsTS(ticker, ['quarterlyDilutedEPS']);
+    return (ts.quarterlyDilutedEPS || []).slice(0, 8).map(p => ({
+      date: p.date, epsActual: r(p.value), epsEstimate: null, surprise: null,
+    }));
+  } catch { return []; }
+}
+
+// ── Income statement (timeseries) ─────────────────────────────────────────────
+async function getIncomeStatement(ticker) {
+  try {
+    const annual = ['annualTotalRevenue','annualGrossProfit','annualOperatingIncome','annualNetIncome','annualDilutedEPS','annualBasicEPS'];
+    const quart  = annual.map(t => t.replace('annual', 'quarterly'));
+    const ts = await fetchFundamentalsTS(ticker, [...annual, ...quart]);
+    const map = (prefix) => mergeSeries(ts, {
+      revenue:         `${prefix}TotalRevenue`,
+      grossProfit:     `${prefix}GrossProfit`,
+      operatingIncome: `${prefix}OperatingIncome`,
+      netIncome:       `${prefix}NetIncome`,
+      eps:             `${prefix}DilutedEPS`,
+      epsBasic:        `${prefix}BasicEPS`,
+    }).map(s => ({
+      date: s.year, revenue: s.revenue, grossProfit: s.grossProfit,
+      operatingIncome: s.operatingIncome, netIncome: s.netIncome,
+      eps: r(s.eps ?? s.epsBasic),
+    }));
+    return { annual: map('annual'), quarterly: map('quarterly') };
+  } catch { return { annual: [], quarterly: [] }; }
+}
+
+// ── Balance sheet (timeseries) ────────────────────────────────────────────────
+async function getBalanceSheet(ticker) {
+  try {
+    const ts = await fetchFundamentalsTS(ticker, [
+      'annualTotalAssets','annualTotalLiabilitiesNetMinorityInterest','annualStockholdersEquity',
+      'annualCashAndCashEquivalents','annualCurrentAssets','annualCurrentLiabilities',
+    ]);
+    return mergeSeries(ts, {
+      totalAssets:      'annualTotalAssets',
+      totalLiabilities: 'annualTotalLiabilitiesNetMinorityInterest',
+      equity:           'annualStockholdersEquity',
+      cash:             'annualCashAndCashEquivalents',
+      curAssets:        'annualCurrentAssets',
+      curLiab:          'annualCurrentLiabilities',
+    }).map(s => ({
+      year: s.year, totalAssets: s.totalAssets, totalLiabilities: s.totalLiabilities,
+      equity: s.equity, cash: s.cash,
+      currentRatio: (s.curAssets != null && s.curLiab) ? r(s.curAssets / s.curLiab) : null,
+    }));
+  } catch { return []; }
+}
+
+// ── Cash flow (timeseries) ────────────────────────────────────────────────────
+async function getCashFlow(ticker) {
+  try {
+    const ts = await fetchFundamentalsTS(ticker, [
+      'annualOperatingCashFlow','annualCapitalExpenditure','annualFreeCashFlow','annualCashDividendsPaid',
+    ]);
+    return mergeSeries(ts, {
+      operatingCF:   'annualOperatingCashFlow',
+      capEx:         'annualCapitalExpenditure',
+      freeCashFlow:  'annualFreeCashFlow',
+      dividendsPaid: 'annualCashDividendsPaid',
+    }).map(s => ({
+      year: s.year, operatingCF: s.operatingCF, capEx: s.capEx,
+      freeCashFlow: s.freeCashFlow != null ? s.freeCashFlow
+                    : (s.operatingCF != null ? s.operatingCF + (s.capEx || 0) : null),
+      dividendsPaid: s.dividendsPaid,
+    }));
+  } catch { return []; }
 }
 
 module.exports = {
   getBatchPrices, getCachedBatchPrices, getQuote, getTimeSeries,
   getFundamentalsData, getEarnings, getIncomeStatement, getBalanceSheet, getCashFlow,
-  correctTicker, tdSymbol, r,
+  correctTicker, tdSymbol, sectorFor, r,
 };
