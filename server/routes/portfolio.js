@@ -8,34 +8,36 @@ const mds = require('../services/marketDataService');
 async function enrichAllHoldings(rawHoldings) {
   if (!rawHoldings.length) return [];
 
-  // Step 1: Batch fetch all prices in ONE API call
+  // Step 1: Batch fetch full quotes (price + previous close) in ONE pass
   const tickers   = rawHoldings.map(h => h.ticker);
-  let priceMap    = {};
-  let liveSuccess = false;
+  let quoteMap    = {};
 
   try {
-    priceMap    = await mds.getCachedBatchPrices(tickers);
-    liveSuccess = Object.keys(priceMap).length > 0;
+    quoteMap = await mds.getCachedBatchQuotes(tickers);
   } catch (err) {
-    console.warn(`⚠️  Batch price fetch failed: ${err.message}`);
+    console.warn(`⚠️  Batch quote fetch failed: ${err.message}`);
   }
 
-  // Step 2: Enrich each holding using batch prices (no extra API calls)
+  // Step 2: Enrich each holding using batch quotes (no extra API calls)
   return rawHoldings.map(h => {
-    const livePrice  = priceMap[h.ticker];
-    const currentPrice = livePrice && livePrice > 0 ? livePrice : h.avgBuyPrice;
+    const q            = quoteMap[h.ticker];
+    const livePrice    = q && q.price > 0;
+    const currentPrice = livePrice ? q.price : h.avgBuyPrice;
+    const prevClose    = livePrice ? (q.previousClose || currentPrice) : currentPrice;
     const totalValue   = currentPrice * h.shares;
     const totalCost    = h.avgBuyPrice * h.shares;
     const pnl          = totalValue - totalCost;
     const pnlPercent   = ((currentPrice - h.avgBuyPrice) / h.avgBuyPrice) * 100;
+    const dailyChange  = livePrice ? (currentPrice - prevClose) : 0;   // per-share
 
     return {
       ...h,
       displayTicker:      h.ticker.replace('.NS','').replace('.BO',''),
       yahooSymbol:        h.ticker,
       currentPrice:       round(currentPrice),
-      dailyChange:        0,
-      dailyChangePercent: 0,
+      dailyChange:        round(dailyChange),
+      dailyChangePercent: livePrice && prevClose ? round((dailyChange / prevClose) * 100) : 0,
+      dailyPnl:           round(dailyChange * h.shares),
       totalValue:         round(totalValue),
       totalCost:          round(totalCost),
       pnl:                round(pnl),
@@ -43,7 +45,7 @@ async function enrichAllHoldings(rawHoldings) {
       sector:             'Equity',
       name:               h.notes || h.ticker.replace('.NS','').replace('.BO',''),
       technical:          null,
-      livePrice:          !!livePrice,
+      livePrice,
     };
   });
 }
@@ -57,7 +59,7 @@ router.get('/', async (req, res) => {
     const totalValue = holdings.reduce((s,h) => s + h.totalValue, 0);
     const totalCost  = holdings.reduce((s,h) => s + h.totalCost,  0);
     const totalPnl   = totalValue - totalCost;
-    const dailyPnl   = 0;
+    const dailyPnl   = holdings.reduce((s,h) => s + (h.dailyPnl || 0), 0);
 
     const sectors = {};
     holdings.forEach(h => { sectors[h.sector] = (sectors[h.sector]||0) + h.totalValue; });
@@ -73,6 +75,7 @@ router.get('/', async (req, res) => {
         totalPnl:        round(totalPnl),
         totalPnlPercent: totalCost ? round((totalPnl/totalCost)*100) : 0,
         dailyPnl:        round(dailyPnl),
+        dailyPnlPercent: (totalValue - dailyPnl) ? round((dailyPnl/(totalValue - dailyPnl))*100) : 0,
         holdingCount:    holdings.length,
       },
       sectorAllocation,

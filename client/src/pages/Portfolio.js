@@ -98,18 +98,16 @@ export default function Portfolio() {
 
   const load = () => {
     setLoading(true); setError(null);
-    Promise.all([
-      axios.get('/api/portfolio').catch(e => ({ data: null, _err: e })),
-      axios.get('/api/recommendations').catch(() => ({ data: { recommendations: [] } })),
-    ]).then(([p, r]) => {
-      if (p.data) {
-        setPortfolio(p.data);
-        setLiveMode(p.data.holdings?.some(h => h.livePrice) ?? false);
-      } else {
-        setError(p._err?.response?.data?.error || 'Failed to load portfolio. Is the server running?');
-      }
-      setRecs(r.data?.recommendations || []);
+    // Portfolio loads fast and renders the table immediately.
+    axios.get('/api/portfolio').then(p => {
+      setPortfolio(p.data);
+      setLiveMode(p.data.holdings?.some(h => h.livePrice) ?? false);
+    }).catch(e => {
+      setError(e?.response?.data?.error || 'Failed to load portfolio. Is the server running?');
     }).finally(() => setLoading(false));
+    // Signals come from the same engine as the Report tab; loaded separately so
+    // the slower fundamental scan doesn't block the table.
+    axios.get('/api/recommendations').then(r => setRecs(r.data?.recommendations || [])).catch(() => setRecs([]));
   };
 
   useEffect(() => { load(); }, []);
@@ -246,10 +244,10 @@ export default function Portfolio() {
                     <td>
                       {rec ? (
                         <div style={{ position: 'relative' }} className="rec-cell">
-                          <span className={`badge badge-${rec.recommendation}`}>{rec.recommendation.toUpperCase()}</span>
+                          <span className={`badge badge-${rec.recommendation}`}>{rec.action || rec.recommendation.toUpperCase()}</span>
                           {rec.reasons?.length > 0 && (
                             <div className="rec-tooltip">
-                              <div style={{ fontWeight:700, marginBottom:6, color:'var(--text-primary)' }}>Why {rec.recommendation.toUpperCase()}?</div>
+                              <div style={{ fontWeight:700, marginBottom:6, color:'var(--text-primary)' }}>Why {rec.action || rec.recommendation.toUpperCase()}?</div>
                               {rec.reasons.map((r,i) => (
                                 <div key={i} style={{ display:'flex', gap:6, alignItems:'flex-start', marginBottom:4 }}>
                                   <span style={{ color: r.type==='bullish'?'var(--green)':r.type==='bearish'?'var(--red)':'var(--amber)', flexShrink:0, fontSize:10 }}>

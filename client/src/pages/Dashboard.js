@@ -20,7 +20,7 @@ function MetricCard({ label, value, sub, color }) {
 
 function RecommendationBadge({ rec }) {
   if (!rec) return <span className="badge" style={{ background: '#ffffff11', color: 'var(--text-muted)' }}>—</span>;
-  return <span className={`badge badge-${rec.recommendation}`}>{rec.recommendation.toUpperCase()}</span>;
+  return <span className={`badge badge-${rec.recommendation}`}>{rec.action || rec.recommendation.toUpperCase()}</span>;
 }
 
 export default function Dashboard() {
@@ -35,21 +35,14 @@ export default function Dashboard() {
   const fetchData = () => {
     setLoading(true);
     setError(null);
-    Promise.all([
-      axios.get('/api/portfolio').catch(e => ({ data: null, error: e })),
-      axios.get('/api/recommendations').catch(() => ({ data: { recommendations: [] } })),
-    ]).then(([p, r]) => {
-      if (p.data) {
-        setPortfolio(p.data);
-        // Check if live prices are available
-        const hasLive = p.data.holdings?.some(h => h.livePrice);
-        setLiveMode(hasLive);
-      } else {
-        setError('Could not load portfolio. Make sure the server is running.');
-      }
-      setRecs(r.data?.recommendations || []);
+    axios.get('/api/portfolio').then(p => {
+      setPortfolio(p.data);
+      setLiveMode(p.data.holdings?.some(h => h.livePrice));
+    }).catch(() => {
+      setError('Could not load portfolio. Make sure the server is running.');
     }).finally(() => setLoading(false));
-    // Volume spikes load independently (slower scan) so they don't block the dashboard
+    // Recommendations + volume load independently (slower scans) so they don't block the dashboard
+    axios.get('/api/recommendations').then(r => setRecs(r.data?.recommendations || [])).catch(() => setRecs([]));
     axios.get('/api/signals/volume?scope=all').then(v => setVolume(v.data)).catch(() => setVolume(null));
   };
 
@@ -92,7 +85,8 @@ export default function Dashboard() {
         <MetricCard label="Total P&L" value={signedMoney(summary.totalPnl)}
           sub={`${summary.totalPnlPercent >= 0 ? '+' : ''}${summary.totalPnlPercent}% all time`}
           color={summary.totalPnl >= 0 ? 'var(--green)' : 'var(--red)'} />
-        <MetricCard label="Today's P&L" value={signedMoney(summary.dailyPnl)} sub="Market hours"
+        <MetricCard label="Today's P&L" value={signedMoney(summary.dailyPnl)}
+          sub={summary.dailyPnlPercent != null ? `${summary.dailyPnlPercent >= 0 ? '+' : ''}${summary.dailyPnlPercent}% today` : 'Market hours'}
           color={summary.dailyPnl >= 0 ? 'var(--green)' : 'var(--red)'} />
         <MetricCard label="Portfolio Cost" value={money(summary.totalCost)} sub="Total invested" />
       </div>

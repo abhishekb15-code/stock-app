@@ -1,74 +1,45 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../models/db');
-const mds     = require('../services/marketDataService');
-const { normalizeSymbol, displaySymbol, round } = require('../services/indianMarketData');
+const { round } = require('../services/indianMarketData');
+const { clientReport } = require('../services/analysisEngine');
 
-// Generate simple rule-based recommendations from batch price data only
-// No per-stock API calls — uses only data already fetched in batch
+// Map the report's action vocabulary to a badge key used by the UI.
+const ACTION_KEY = { 'BUY MORE': 'buy', 'HOLD': 'hold', 'TRIM': 'trim', 'SELL': 'sell' };
+
+// Recommendations are the SAME engine as the Report tab (analysisEngine.clientReport),
+// so the Portfolio "Signal" and the Report "Action" always agree for a given stock.
+// clientReport is cached (5 min), so this is cheap after the first call.
 router.get('/', async (req, res) => {
   try {
     const holdings = db.portfolio.findAll();
     if (!holdings.length) return res.json({ recommendations: [], generatedAt: new Date().toISOString() });
 
-    // One batch price call for all holdings
-    const tickers  = holdings.map(h => h.ticker);
-    let priceMap   = {};
-    try {
-      priceMap = await mds.getCachedBatchPrices(tickers);
-    } catch (err) {
-      console.warn('Batch price fetch failed for recommendations:', err.message);
-    }
+    const report = await clientReport(holdings);
 
-    const recs = holdings.map(h => {
-      const currentPrice = priceMap[h.ticker] || h.avgBuyPrice;
-      const pnlPct       = ((currentPrice - h.avgBuyPrice) / h.avgBuyPrice) * 100;
-      const livePrice    = !!priceMap[h.ticker];
-
-      // Simple rule-based recommendation from P&L only (no extra API calls)
-      const reasons = [];
-      let action = 'HOLD';
-
-      if (pnlPct > 50) {
-        action = 'TRIM';
-        reasons.push({ type:'bullish', text:`Up ${round(pnlPct,1)}% — consider booking partial profits` });
-      } else if (pnlPct > 20) {
-        action = 'HOLD';
-        reasons.push({ type:'bullish', text:`Up ${round(pnlPct,1)}% — strong performer, hold position` });
-      } else if (pnlPct > 0) {
-        action = 'HOLD';
-        reasons.push({ type:'neutral', text:`Up ${round(pnlPct,1)}% — in profit, monitor for continuation` });
-      } else if (pnlPct > -20) {
-        action = 'HOLD';
-        reasons.push({ type:'neutral', text:`Down ${Math.abs(round(pnlPct,1))}% — within acceptable range` });
-      } else if (pnlPct > -40) {
-        action = 'HOLD';
-        reasons.push({ type:'caution', text:`Down ${Math.abs(round(pnlPct,1))}% — review original thesis` });
-      } else {
-        action = 'SELL';
-        reasons.push({ type:'bearish', text:`Down ${Math.abs(round(pnlPct,1))}% — significant loss, review position` });
-      }
-
-      if (!livePrice) {
-        reasons.push({ type:'neutral', text:'Live price unavailable — add TWELVE_DATA_API_KEY for full analysis' });
-      }
-
+    const recs = report.holdings.map(h => {
+      const rec   = h.recommendation || {};
+      const score = rec.score ?? 50;
       return {
-        ticker:        h.ticker,
-        displayTicker: h.ticker.replace('.NS','').replace('.BO',''),
-        recommendation: action.toLowerCase().replace(' ','_'),
-        confidence:    livePrice ? 0.7 : 0.4,
-        reasons,
-        currentPrice:  round(currentPrice),
-        pnlPct:        round(pnlPct,2),
-        livePrice,
+        ticker:         h.ticker,
+        displayTicker:  h.displayTicker,
+        recommendation: ACTION_KEY[rec.action] || 'hold',   // badge class key
+        action:         rec.action || 'HOLD',               // full label
+        score,
+        confidence:     round(Math.min(0.95, Math.max(0.5, 0.5 + Math.abs(score - 50) / 100)), 2),
+        reasons:        rec.reasons || [],
+        currentPrice:   round(h.currentPrice),
+        pnlPct:         round(h.pnlPct, 2),
+        stopLoss:       rec.stopLoss ?? null,
+        takeProfit:     rec.takeProfit ?? null,
+        livePrice:      h.dataAvailable !== false,
       };
     });
 
     db.recommendations.clear();
     recs.forEach(r => db.recommendations.upsert(r));
 
-    res.json({ recommendations: recs, generatedAt: new Date().toISOString() });
+    res.json({ recommendations: recs, generatedAt: report.generatedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

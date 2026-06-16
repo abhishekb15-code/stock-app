@@ -253,6 +253,22 @@ async function getCachedBatchPrices(tickers) {
   return getBatchPrices(tickers);   // per-ticker cache inside getQuoteRaw handles freshness
 }
 
+// Like getBatchPrices but returns the full quote (price, previousClose, change,
+// changePercent, …) per ticker — needed for daily P&L.
+async function getCachedBatchQuotes(tickers) {
+  if (!tickers.length) return {};
+  const result = {};
+  const BATCH = 5, DELAY = 300;
+  for (let i = 0; i < tickers.length; i += BATCH) {
+    const batch = tickers.slice(i, i + BATCH);
+    const needNetwork = batch.some(t => cachedPrice(t) == null);
+    const res = await Promise.allSettled(batch.map(t => getQuoteRaw(t)));
+    res.forEach((r, idx) => { if (r.status === 'fulfilled') result[batch[idx]] = r.value; });
+    if (needNetwork && i + BATCH < tickers.length) await sleep(DELAY);
+  }
+  return result;
+}
+
 // ── Single quote ───────────────────────────────────────────────────────────────
 async function getQuote(ticker) {
   const q = await getQuoteRaw(ticker);
@@ -465,7 +481,7 @@ async function getCashFlow(ticker) {
 }
 
 module.exports = {
-  getBatchPrices, getCachedBatchPrices, getQuote, getTimeSeries,
+  getBatchPrices, getCachedBatchPrices, getCachedBatchQuotes, getQuote, getTimeSeries,
   getFundamentalsData, getEarnings, getIncomeStatement, getBalanceSheet, getCashFlow,
   correctTicker, tdSymbol, sectorFor, r,
 };

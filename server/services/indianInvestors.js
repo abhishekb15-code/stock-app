@@ -100,6 +100,32 @@ const INVESTORS = [
       { ticker: 'DHAMPURSUG.NS', company: 'Dhampur Sugar Mills',    sector: 'Consumer Defensive' },
     ],
   },
+  {
+    key: 'dolly', name: 'Dolly Khanna', fund: 'Rajiv & Dolly Khanna',
+    note: 'Value-style cyclical/commodity small-caps; portfolio rotates frequently',
+    holdings: [
+      { ticker: 'PRAKASH.NS',  company: 'Prakash Industries',  sector: 'Basic Materials' },
+      { ticker: 'KCP.NS',      company: 'KCP Ltd',             sector: 'Basic Materials' },
+      { ticker: 'NACLIND.NS',  company: 'NACL Industries',     sector: 'Basic Materials' },
+      { ticker: 'RACLGEAR.NS', company: 'RACL Geartech',       sector: 'Consumer Cyclical' },
+      { ticker: 'POLYPLEX.NS', company: 'Polyplex',            sector: 'Basic Materials' },
+    ],
+  },
+  {
+    key: 'porinju', name: 'Porinju Veliyath', fund: 'Equity Intelligence India',
+    note: 'Contrarian "special situations" small-cap investor',
+    holdings: [
+      { ticker: 'ORIENTBELL.NS', company: 'Orient Bell (tiles)',  sector: 'Industrials' },
+      { ticker: 'KSOLVES.NS',    company: 'KSolves India',        sector: 'Technology' },
+      { ticker: 'SHALPAINTS.NS', company: 'Shalimar Paints',      sector: 'Basic Materials' },
+      { ticker: 'RPSGVENT.NS',   company: 'RPSG Ventures',        sector: 'Consumer Cyclical' },
+    ],
+  },
+  {
+    key: 'rdamani', name: 'Ramesh Damani', fund: 'Renowned BSE-member investor',
+    note: 'Veteran long-term investor; keeps a concentrated book with few public >1% disclosures, so individual holdings are not reliably tracked here',
+    holdings: [],
+  },
 ];
 
 let _cache = { ts: 0, data: null };

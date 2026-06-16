@@ -80,6 +80,7 @@ body {
 .badge-buy { background: var(--green-dim); color: var(--green); border: 1px solid #10b98144; }
 .badge-sell { background: var(--red-dim); color: var(--red); border: 1px solid #ef444444; }
 .badge-hold { background: var(--amber-dim); color: var(--amber); border: 1px solid #f59e0b44; }
+.badge-trim { background: #4c1d9522; color: #a78bfa; border: 1px solid #8b5cf644; }
 .badge-13f { background: #8b5cf622; color: var(--purple); border: 1px solid #8b5cf644; }
 .badge-options { background: #06b6d422; color: var(--cyan); border: 1px solid #06b6d444; }
 .badge-volume_spike { background: var(--amber-dim); color: var(--amber); border: 1px solid #f59e0b44; }

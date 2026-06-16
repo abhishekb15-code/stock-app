@@ -148,6 +148,11 @@ export default function SuperInvestors() {
           {inv && !inv.error && (india ? (
             <>
               <SectionHeader icon={TrendingUp} sub={inv.note}>{inv.name} — {inv.fund}</SectionHeader>
+              {inv.holdings.length === 0 ? (
+                <div className="card" style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
+                  No individually-tracked holdings for this investor (limited public &gt;1% disclosures).
+                </div>
+              ) : (
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead><tr><th>Company</th><th>Ticker</th><th>Sector</th><th>Price</th><th>Today</th></tr></thead>
@@ -166,6 +171,7 @@ export default function SuperInvestors() {
                   </tbody>
                 </table>
               </div>
+              )}
             </>
           ) : (
             <>
