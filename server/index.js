@@ -14,8 +14,10 @@ const recommendationRoutes = require('./routes/recommendations');
 const analysisRoutes = require('./routes/analysis');
 
 const { initScheduler } = require('./jobs/scheduler');
+const auth = require('./services/authService');
 
 const app = express();
+app.set('trust proxy', 1);   // Render runs behind a proxy (needed for secure cookies / proto)
 const PORT = process.env.PORT || 5000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -35,6 +37,27 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 
+// Open routes (no auth): health check + auth endpoints themselves
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    mode: 'live',
+    market: 'India NSE',
+    dataProvider: 'yahoo-finance2',
+    authEnabled: auth.isConfigured(),
+    servesFrontend: hasBuild,
+  });
+});
+app.use('/api/auth', require('./routes/auth'));
+
+if (auth.isConfigured()) {
+  console.log(`🔒 Auth ENABLED — Google Sign-In, ${auth.cfg.allowed.includes('*') ? 'any verified Google account' : auth.cfg.allowed.length + ' allowed email(s)'}`);
+} else {
+  console.warn('⚠️  Auth DISABLED — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, JWT_SECRET, ALLOWED_EMAILS to lock the app down.');
+}
+app.use('/api', auth.requireAuth);   // protects every /api/* route mounted below
+
 // API Routes
 app.use('/api/stock', stockRoutes);
 app.use('/api/portfolio', portfolioRoutes);
@@ -47,18 +70,6 @@ app.use('/api/signals', require('./routes/signals'));
 app.use('/api/superinvestors', require('./routes/superinvestors'));
 app.use('/api/indian-investors', require('./routes/indianInvestors'));
 app.use('/api/debug', require('./routes/debug'));
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    mode: 'live',
-    market: 'India NSE',
-    dataProvider: 'yahoo-finance2',
-    servesFrontend: hasBuild,
-  });
-});
 
 // Serve React build (production / local single-port mode)
 if (hasBuild) {

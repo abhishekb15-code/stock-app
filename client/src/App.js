@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import axios from 'axios';
 import Sidebar from './components/layout/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Portfolio from './pages/Portfolio';
@@ -7,12 +8,33 @@ import StockDeepDive from './pages/StockDeepDive';
 import WhaleSignals from './pages/WhaleSignals';
 import Watchlist from './pages/Watchlist';
 import SuperInvestors from './pages/SuperInvestors';
+import Login from './pages/Login';
+
+axios.defaults.withCredentials = true;   // send the session cookie with API calls
 
 export default function App() {
+  const [auth, setAuth] = useState(null);   // null = checking
+
+  useEffect(() => {
+    axios.get('/api/auth/me')
+      .then(r => setAuth(r.data))
+      .catch(() => setAuth({ authEnabled: false, authenticated: false }));   // fail open if the check itself errors
+  }, []);
+
+  if (!auth) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <span className="loading-dot" /><span className="loading-dot" /><span className="loading-dot" />
+      </div>
+    );
+  }
+
+  if (auth.authEnabled && !auth.authenticated) return <Login />;
+
   return (
     <BrowserRouter>
       <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar />
+        <Sidebar user={auth.user} />
         <main style={{ flex: 1, marginLeft: 220, padding: '28px 32px', maxWidth: 'calc(100vw - 220px)' }}>
           <Routes>
             <Route path="/" element={<Dashboard />} />

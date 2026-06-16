@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown } from 'lucide-react';
+import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown, LogOut } from 'lucide-react';
 import axios from 'axios';
 
 const navItems = [
@@ -11,7 +11,7 @@ const navItems = [
   { to: '/investors', icon: Crown, label: 'Ace Investors' },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ user }) {
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [emailMsg, setEmailMsg] = useState('');
@@ -23,6 +23,11 @@ export default function Sidebar() {
       navigate(`/stock/${search.trim().toUpperCase()}`);
       setSearch('');
     }
+  };
+
+  const logout = async () => {
+    try { await axios.post('/api/auth/logout'); } catch {}
+    window.location.href = '/';
   };
 
   const triggerEmail = async () => {
@@ -100,7 +105,7 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Digest trigger */}
+      {/* Digest trigger + account */}
       <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
         <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }}
           title="Runs the portfolio analysis digest now. If Gmail is configured it sends an email; otherwise it logs the report on the server."
@@ -109,6 +114,21 @@ export default function Sidebar() {
           {sending ? 'Running...' : 'Send Digest'}
         </button>
         {emailMsg && <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center', marginTop: 8 }}>{emailMsg}</div>}
+
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            {user.picture
+              ? <img src={user.picture} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} referrerPolicy="no-referrer" />
+              : <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--blue)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>{(user.name || user.email || '?')[0].toUpperCase()}</div>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.name || user.email}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>
+            </div>
+            <button onClick={logout} title="Sign out" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}>
+              <LogOut size={15} />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );
