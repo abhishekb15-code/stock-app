@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity } from 'lucide-react';
+import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown } from 'lucide-react';
 import axios from 'axios';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/portfolio', icon: Briefcase, label: 'Portfolio' },
+  { to: '/watchlist', icon: Star, label: 'Watchlist' },
   { to: '/whales', icon: Fish, label: 'Whale Signals' },
+  { to: '/investors', icon: Crown, label: 'Ace Investors' },
 ];
 
 export default function Sidebar() {

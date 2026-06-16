@@ -5,6 +5,8 @@ import Dashboard from './pages/Dashboard';
 import Portfolio from './pages/Portfolio';
 import StockDeepDive from './pages/StockDeepDive';
 import WhaleSignals from './pages/WhaleSignals';
+import Watchlist from './pages/Watchlist';
+import SuperInvestors from './pages/SuperInvestors';
 
 export default function App() {
   return (
@@ -16,7 +18,9 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/stock/:ticker" element={<StockDeepDive />} />
+            <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/whales" element={<WhaleSignals />} />
+            <Route path="/investors" element={<SuperInvestors />} />
           </Routes>
         </main>
       </div>

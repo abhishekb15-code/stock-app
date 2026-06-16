@@ -42,6 +42,9 @@ app.use('/api/whales', whaleRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/analysis', analysisRoutes);
+app.use('/api/watchlist', require('./routes/watchlist'));
+app.use('/api/signals', require('./routes/signals'));
+app.use('/api/superinvestors', require('./routes/superinvestors'));
 app.use('/api/debug', require('./routes/debug'));
 
 // Health check

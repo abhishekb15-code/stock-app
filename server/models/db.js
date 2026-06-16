@@ -52,11 +52,11 @@ function loadFromDisk() {
   return null;
 }
 
-function saveToDisk(portfolio, whaleSignals, recommendations) {
+function persist() {
   if (IS_CLOUD) return; // no filesystem persistence on cloud
   try {
     fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(storePath, JSON.stringify({ portfolio, whaleSignals, recommendations }, null, 2));
+    fs.writeFileSync(storePath, JSON.stringify({ portfolio, whaleSignals, recommendations, watchlist }, null, 2));
   } catch (e) {
     console.warn('Could not save store.json:', e.message);
   }
@@ -80,9 +80,10 @@ const diskStore = IS_CLOUD ? null : loadFromDisk();
 let portfolio       = (diskStore?.portfolio || SEED_HOLDINGS).map(normalizeHolding);
 let whaleSignals    = diskStore?.whaleSignals    || [];
 let recommendations = diskStore?.recommendations || [];
+let watchlist       = diskStore?.watchlist       || [];
 
 // Save initial state to disk (local only)
-if (!IS_CLOUD) saveToDisk(portfolio, whaleSignals, recommendations);
+if (!IS_CLOUD) persist();
 
 console.log(`📦 DB: ${IS_CLOUD ? 'in-memory (cloud)' : 'persistent (local)'} | ${portfolio.length} holdings loaded`);
 
@@ -95,7 +96,7 @@ const db = {
     create: (data) => {
       const h = normalizeHolding(data);
       portfolio.push(h);
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return h;
     },
 
@@ -103,7 +104,7 @@ const db = {
       const normalized = holdings.map(normalizeHolding)
         .filter(h => Number.isFinite(h.shares) && Number.isFinite(h.avgBuyPrice) && h.shares > 0);
       portfolio = mode === 'append' ? [...portfolio, ...normalized] : normalized;
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return [...portfolio];
     },
 
@@ -111,7 +112,7 @@ const db = {
       const idx = portfolio.findIndex(h => h.id === id);
       if (idx === -1) return false;
       portfolio.splice(idx, 1);
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return true;
     },
 
@@ -124,14 +125,14 @@ const db = {
         shares:      data.shares      !== undefined ? Number(data.shares)      : portfolio[idx].shares,
         avgBuyPrice: data.avgBuyPrice !== undefined ? Number(data.avgBuyPrice) : portfolio[idx].avgBuyPrice,
       };
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return portfolio[idx];
     },
 
     // Reset to seed holdings (useful after deploy)
     reset: () => {
       portfolio = SEED_HOLDINGS.map(normalizeHolding);
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return [...portfolio];
     },
   },
@@ -144,7 +145,7 @@ const db = {
     create: (data) => {
       const s = { id: uuidv4(), createdAt: new Date().toISOString(), ...data };
       whaleSignals.unshift(s);
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return s;
     },
   },
@@ -156,10 +157,53 @@ const db = {
       const idx = recommendations.findIndex(r => r.ticker === data.ticker);
       const rec = { id: uuidv4(), generatedAt: new Date().toISOString(), ...data };
       if (idx > -1) recommendations[idx] = rec; else recommendations.push(rec);
-      saveToDisk(portfolio, whaleSignals, recommendations);
+      persist();
       return rec;
     },
-    clear: () => { recommendations = []; saveToDisk(portfolio, whaleSignals, recommendations); },
+    clear: () => { recommendations = []; persist(); },
+  },
+
+  watchlist: {
+    findAll: () => [...watchlist],
+    exists:  (ticker) => watchlist.some(w => w.ticker === normalizeSymbol(ticker)),
+
+    create: (data) => {
+      const ticker = normalizeSymbol(data.ticker || data.symbol);
+      const existing = watchlist.find(w => w.ticker === ticker);
+      if (existing) {   // idempotent — update note/target instead of duplicating
+        existing.note        = data.note ?? existing.note;
+        existing.targetPrice = data.targetPrice != null ? Number(data.targetPrice) : existing.targetPrice;
+        persist();
+        return existing;
+      }
+      const item = {
+        id:          uuidv4(),
+        ticker,
+        note:        data.note || '',
+        targetPrice: data.targetPrice != null ? Number(data.targetPrice) : null,
+        addedAt:     new Date().toISOString(),
+      };
+      watchlist.unshift(item);
+      persist();
+      return item;
+    },
+
+    update: (id, data) => {
+      const item = watchlist.find(w => w.id === id);
+      if (!item) return null;
+      if (data.note !== undefined)        item.note = data.note;
+      if (data.targetPrice !== undefined) item.targetPrice = data.targetPrice != null ? Number(data.targetPrice) : null;
+      persist();
+      return item;
+    },
+
+    delete: (id) => {
+      const idx = watchlist.findIndex(w => w.id === id);
+      if (idx === -1) return false;
+      watchlist.splice(idx, 1);
+      persist();
+      return true;
+    },
   },
 };
 

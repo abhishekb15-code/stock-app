@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { TrendingUp, TrendingDown, DollarSign, PieChart, RefreshCw, AlertCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, PieChart, RefreshCw, AlertCircle, Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7'];
@@ -26,6 +26,7 @@ function RecommendationBadge({ rec }) {
 export default function Dashboard() {
   const [portfolio, setPortfolio] = useState(null);
   const [recs, setRecs] = useState([]);
+  const [volume, setVolume] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [liveMode, setLiveMode] = useState(true);
@@ -48,6 +49,8 @@ export default function Dashboard() {
       }
       setRecs(r.data?.recommendations || []);
     }).finally(() => setLoading(false));
+    // Volume spikes load independently (slower scan) so they don't block the dashboard
+    axios.get('/api/signals/volume?scope=all').then(v => setVolume(v.data)).catch(() => setVolume(null));
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -161,6 +164,57 @@ export default function Dashboard() {
           ) : (
             <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 40 }}>No sector data</div>
           )}
+        </div>
+      </div>
+
+      {/* Volume spike highlighter */}
+      <VolumePanel volume={volume} navigate={navigate} />
+    </div>
+  );
+}
+
+function VolumePanel({ volume, navigate }) {
+  const spikes = volume?.signals || [];
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Activity size={15} color="var(--blue)" /> Unusual Volume — Smart-Money Activity
+        </span>
+        {volume && (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            {volume.accumulation} accumulating · {volume.distribution} distributing · {volume.scanned} scanned
+          </span>
+        )}
+      </div>
+      <div style={{ padding: '16px 20px' }}>
+        {!volume && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Scanning volume across portfolio & watchlist…</div>}
+        {volume && spikes.length === 0 && (
+          <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No unusual volume today — all names trading near their 20-day average.</div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+          {spikes.map(s => {
+            const accum = s.direction === 'accumulation';
+            const c = accum ? 'var(--green)' : 'var(--red)';
+            const Icon = accum ? ArrowUpRight : ArrowDownRight;
+            return (
+              <div key={s.ticker} onClick={() => navigate(`/stock/${s.ticker}`)}
+                style={{ cursor: 'pointer', background: 'var(--bg-800)', border: `1px solid ${c}55`, borderRadius: 8, padding: '12px 14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700 }}>{s.displayTicker}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: c, fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+                    <Icon size={13} /> {s.multiplier}×
+                  </span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 11, color: c, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>
+                  {accum ? 'Accumulation' : 'Distribution'} · {s.intensity}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                  {s.priceChangePercent >= 0 ? '+' : ''}{s.priceChangePercent}% · vol {Number(s.volume).toLocaleString('en-IN')}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { ArrowLeft, TrendingUp, TrendingDown, RefreshCw, Download,
-         BarChart2, BookOpen, DollarSign, Users, Globe, FileText } from 'lucide-react';
+         BarChart2, BookOpen, DollarSign, Users, Globe, FileText, Star } from 'lucide-react';
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Area, AreaChart, BarChart
@@ -520,6 +520,13 @@ export default function StockDeepDive() {
   const [report,      setReport]      = useState(null);
   const [loading,     setLoading]     = useState({});
   const [holding,     setHolding]     = useState(null);
+  const [watchState,  setWatchState]  = useState('idle');   // idle | saving | added
+
+  const addToWatchlist = async () => {
+    setWatchState('saving');
+    try { await axios.post('/api/watchlist', { ticker }); setWatchState('added'); }
+    catch { setWatchState('idle'); }
+  };
 
   const setLoad = (key, val) => setLoading(p => ({ ...p, [key]: val }));
 
@@ -600,6 +607,11 @@ export default function StockDeepDive() {
             </div>
           </div>
           <div style={{ display:'flex', gap:8 }}>
+            <button className="btn btn-ghost" style={{ fontSize:12, color: watchState==='added' ? 'var(--green)' : undefined }}
+              onClick={addToWatchlist} disabled={watchState!=='idle'}>
+              <Star size={13} fill={watchState==='added' ? 'currentColor' : 'none'} />
+              {watchState==='added' ? 'On Watchlist' : watchState==='saving' ? 'Adding…' : 'Watch'}
+            </button>
             <button className="btn btn-ghost" style={{ fontSize:12 }} onClick={() => { setStockData(null); setLoad('overview',true); loadTab('overview'); }}>
               <RefreshCw size={13} /> Refresh
             </button>
