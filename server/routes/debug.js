@@ -2,46 +2,56 @@ const express = require('express');
 const router  = express.Router();
 const https   = require('https');
 
-function testUrl(url, headers = {}) {
+function testUrl(name, url, headers = {}) {
   return new Promise((resolve) => {
     const req = https.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0', ...headers },
-      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com/', ...headers },
+      timeout: 10000,
     }, res => {
       let data = '';
       res.on('data', d => data += d);
-      res.on('end', () => resolve({ status: res.statusCode, body: data.substring(0,200) }));
+      res.on('end', () => {
+        let preview = data.substring(0, 150);
+        // Try to extract price if Yahoo chart
+        try {
+          const j = JSON.parse(data);
+          const price = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+          if (price) preview = `PRICE: ${price}`;
+          const err = j?.chart?.error;
+          if (err) preview = `ERROR: ${JSON.stringify(err)}`;
+        } catch {}
+        resolve({ name, status: res.statusCode, works: res.statusCode === 200, preview });
+      });
     });
-    req.on('error', e => resolve({ status: 0, error: e.message }));
-    req.on('timeout', () => { req.destroy(); resolve({ status: 0, error: 'timeout' }); });
+    req.on('error', e => resolve({ name, status: 0, works: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ name, status: 0, works: false, error: 'timeout' }); });
   });
 }
 
 router.get('/', async (req, res) => {
-  const key = process.env.TWELVE_DATA_API_KEY || '9a336f4794a244bead51fcd1edba7160';
   const tests = await Promise.all([
-    testUrl(`https://api.twelvedata.com/price?symbol=RELIANCE:NSE&apikey=${key}`)
-      .then(r => ({ name: 'Twelve Data', ...r })),
-    testUrl('https://stooq.com/q/l/?s=reliance.ns&f=sd2t2ohlcv&h&e=csv')
-      .then(r => ({ name: 'Stooq', ...r })),
-    testUrl('https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?interval=1d&range=2d')
-      .then(r => ({ name: 'Yahoo Finance v8', ...r })),
-    testUrl('https://query2.finance.yahoo.com/v7/finance/quote?symbols=RELIANCE.NS')
-      .then(r => ({ name: 'Yahoo Finance v7', ...r })),
-    testUrl('https://financialmodelingprep.com/api/v3/quote/RELIANCE.NS?apikey=demo')
-      .then(r => ({ name: 'FMP', ...r })),
+    // Price tests
+    testUrl('RELIANCE.NS price',   'https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?interval=1d&range=2d'),
+    testUrl('WEBSOL.NS price',     'https://query1.finance.yahoo.com/v8/finance/chart/WEBSOL.NS?interval=1d&range=2d'),
+    testUrl('WEBELSOLAR.NS price', 'https://query1.finance.yahoo.com/v8/finance/chart/WEBELSOLAR.NS?interval=1d&range=2d'),
+    testUrl('504132.BO price',     'https://query1.finance.yahoo.com/v8/finance/chart/504132.BO?interval=1d&range=2d'),
+    // Fundamentals & analysis tabs
+    testUrl('RELIANCE quoteSummary (financials)',
+      'https://query2.finance.yahoo.com/v10/finance/quoteSummary/RELIANCE.NS?modules=financialData,defaultKeyStatistics'),
+    testUrl('RELIANCE incomeStatement (earnings tab)',
+      'https://query2.finance.yahoo.com/v10/finance/quoteSummary/RELIANCE.NS?modules=incomeStatementHistory'),
+    testUrl('RELIANCE balanceSheet',
+      'https://query2.finance.yahoo.com/v10/finance/quoteSummary/RELIANCE.NS?modules=balanceSheetHistory'),
+    testUrl('RELIANCE cashflow',
+      'https://query2.finance.yahoo.com/v10/finance/quoteSummary/RELIANCE.NS?modules=cashflowStatementHistory'),
+    testUrl('RELIANCE earningsHistory',
+      'https://query2.finance.yahoo.com/v10/finance/quoteSummary/RELIANCE.NS?modules=earningsHistory'),
+    testUrl('RELIANCE assetProfile (sector/industry)',
+      'https://query2.finance.yahoo.com/v10/finance/quoteSummary/RELIANCE.NS?modules=assetProfile'),
   ]);
-  res.json({
-    serverTime: new Date().toISOString(),
-    env: { hasKey: !!process.env.TWELVE_DATA_API_KEY },
-    results: tests.map(t => ({
-      source: t.name,
-      status: t.status,
-      works:  t.status === 200,
-      preview:t.body?.substring(0,100),
-      error:  t.error,
-    })),
-  });
+
+  res.json({ serverTime: new Date().toISOString(), results: tests });
 });
 
 module.exports = router;
