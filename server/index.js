@@ -45,6 +45,7 @@ app.use('/api/analysis', analysisRoutes);
 app.use('/api/watchlist', require('./routes/watchlist'));
 app.use('/api/signals', require('./routes/signals'));
 app.use('/api/superinvestors', require('./routes/superinvestors'));
+app.use('/api/indian-investors', require('./routes/indianInvestors'));
 app.use('/api/debug', require('./routes/debug'));
 
 // Health check
