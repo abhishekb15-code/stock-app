@@ -9,7 +9,7 @@
 
 const https = require('https');
 
-const TD_KEY = () => process.env.TWELVE_DATA_API_KEY || '';
+const TD_KEY = () => process.env.TWELVE_DATA_API_KEY || '9a336f4794a244bead51fcd1edba7160';
 
 function httpGet(url) {
   return new Promise((resolve, reject) => {
