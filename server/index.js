@@ -42,6 +42,7 @@ app.use('/api/whales', whaleRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/analysis', analysisRoutes);
+app.use('/api/debug', require('./routes/debug'));
 
 // Health check
 app.get('/api/health', (req, res) => {
