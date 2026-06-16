@@ -14,7 +14,7 @@ async function enrichAllHoldings(rawHoldings) {
   let liveSuccess = false;
 
   try {
-    priceMap    = await mds.getBatchPrices(tickers);
+    priceMap    = await mds.getCachedBatchPrices(tickers);
     liveSuccess = Object.keys(priceMap).length > 0;
   } catch (err) {
     console.warn(`⚠️  Batch price fetch failed: ${err.message}`);

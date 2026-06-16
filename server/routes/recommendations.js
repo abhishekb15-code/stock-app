@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
     const tickers  = holdings.map(h => h.ticker);
     let priceMap   = {};
     try {
-      priceMap = await mds.getBatchPrices(tickers);
+      priceMap = await mds.getCachedBatchPrices(tickers);
     } catch (err) {
       console.warn('Batch price fetch failed for recommendations:', err.message);
     }
