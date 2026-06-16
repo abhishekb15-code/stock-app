@@ -243,7 +243,26 @@ export default function Portfolio() {
                     <td className={`mono ${h.pnlPercent >= 0 ? 'pos' : 'neg'}`}>{h.pnlPercent >= 0 ? '+' : ''}{h.pnlPercent?.toFixed(2)}%</td>
                     <td className="mono">{h.technical?.rsi?.value?.toFixed(1) || '—'}</td>
                     <td className={`mono ${(h.technical?.macd?.histogram || 0) >= 0 ? 'pos' : 'neg'}`}>{h.technical?.macd?.histogram?.toFixed(3) || '—'}</td>
-                    <td>{rec ? <span className={`badge badge-${rec.recommendation}`}>{rec.recommendation.toUpperCase()}</span> : '—'}</td>
+                    <td>
+                      {rec ? (
+                        <div style={{ position: 'relative' }} className="rec-cell">
+                          <span className={`badge badge-${rec.recommendation}`}>{rec.recommendation.toUpperCase()}</span>
+                          {rec.reasons?.length > 0 && (
+                            <div className="rec-tooltip">
+                              <div style={{ fontWeight:700, marginBottom:6, color:'var(--text-primary)' }}>Why {rec.recommendation.toUpperCase()}?</div>
+                              {rec.reasons.map((r,i) => (
+                                <div key={i} style={{ display:'flex', gap:6, alignItems:'flex-start', marginBottom:4 }}>
+                                  <span style={{ color: r.type==='bullish'?'var(--green)':r.type==='bearish'?'var(--red)':'var(--amber)', flexShrink:0, fontSize:10 }}>
+                                    {r.type==='bullish'?'▲':r.type==='bearish'?'▼':'◆'}
+                                  </span>
+                                  <span style={{ color:'var(--text-secondary)', fontSize:11 }}>{r.text}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : '—'}
+                    </td>
                     <td>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => navigate(`/stock/${h.ticker}`)}>

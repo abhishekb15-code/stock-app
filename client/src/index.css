@@ -149,3 +149,37 @@ body {
 .loading-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: pulse 1.2s ease-in-out infinite; }
 .loading-dot:nth-child(2) { animation-delay: 0.2s; margin: 0 4px; }
 .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Recommendation tooltip */
+.rec-cell { display: inline-block; }
+.rec-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-600);
+  border: 1px solid var(--border-bright);
+  border-radius: 8px;
+  padding: 12px 14px;
+  width: 260px;
+  z-index: 500;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  pointer-events: none;
+}
+.rec-cell:hover .rec-tooltip { display: block; }
+
+/* Loading dots animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+.loading-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--blue);
+  display: inline-block;
+  animation: pulse 1s infinite;
+}
+.loading-dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-dot:nth-child(3) { animation-delay: 0.4s; }

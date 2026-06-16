@@ -1,16 +1,15 @@
 const express = require('express');
-const router = express.Router();
-const db = require('../models/db');
+const router  = express.Router();
+const db      = require('../models/db');
 const { getStockAnalysis, getFundamentals, generateRecommendation } = require('../services/indianMarketData');
 
-// GET /api/recommendations — returns recommendations for all portfolio holdings
-// Falls back gracefully if Yahoo Finance is unavailable
 router.get('/', async (req, res) => {
   try {
     const holdings = db.portfolio.findAll();
-    if (holdings.length === 0) return res.json({ recommendations: [], generatedAt: new Date().toISOString() });
+    if (!holdings.length) return res.json({ recommendations: [], generatedAt: new Date().toISOString() });
 
     db.recommendations.clear();
+
     const results = await Promise.allSettled(
       holdings.map(async (h) => {
         try {
@@ -23,13 +22,13 @@ router.get('/', async (req, res) => {
           return rec;
         } catch (err) {
           console.warn(`⚠️  Recommendation skipped for ${h.ticker}: ${err.message}`);
-          // Return a neutral hold recommendation so UI still shows something
           const fallback = {
-            ticker: h.ticker,
-            recommendation: 'hold',
-            confidence: 0,
-            reasons: ['Live data unavailable'],
-            score: 50,
+            ticker:        h.ticker,
+            displayTicker: h.ticker.replace('.NS','').replace('.BO',''),
+            recommendation:'hold',
+            confidence:    0,
+            reasons: [{ type:'neutral', text:'Live data unavailable — showing default hold' }],
+            score:   50,
           };
           db.recommendations.upsert(fallback);
           return fallback;
