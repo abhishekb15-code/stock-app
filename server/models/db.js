@@ -11,7 +11,7 @@ const { normalizeSymbol } = require('../services/indianMarketData');
 // ── Seeded portfolio — your 24 holdings from Equity sheet ─────────────────────
 const SEED_HOLDINGS = [
   { ticker:'OIL.NS',        shares:4500,   avgBuyPrice:245.54,  notes:'Oil India Ltd' },
-  { ticker:'WEBSOL.NS',     shares:18000,  avgBuyPrice:40.25,   notes:'Webel Solar' },
+  { ticker:'WEBELSOLAR.NS',     shares:18000,  avgBuyPrice:40.25,   notes:'Webel Solar' },
   { ticker:'STEELCAS.NS',   shares:4950,   avgBuyPrice:131.00,  notes:'Steelcast Ltd' },
   { ticker:'NATCOPHARM.NS', shares:990,    avgBuyPrice:1142.00, notes:'Natco Pharma' },
   { ticker:'RISHABH.NS',    shares:2430,   avgBuyPrice:437.20,  notes:'Rishabh Instruments' },
