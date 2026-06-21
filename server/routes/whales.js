@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../models/db');
+const store = require('../services/store');
+const auth = require('../services/authService');
 const { normalizeSymbol } = require('../services/indianMarketData');
 const { getSignalsForPortfolio } = require('../services/signalsService');
 
@@ -9,7 +11,7 @@ router.get('/', async (req, res) => {
   try {
     const { type } = req.query;
     const manualSignals = db.whales.findAll();
-    const generatedSignals = await getSignalsForPortfolio(db.portfolio.findAll());
+    const generatedSignals = await getSignalsForPortfolio(await store.getHoldings(auth.currentEmail(req)));
     const allSignals = [...generatedSignals, ...manualSignals];
     const signals = type ? allSignals.filter(s => s.signalType === type) : allSignals;
     res.json({ signals, count: signals.length });

@@ -1,7 +1,8 @@
 const express = require('express');
 const router  = express.Router();
-const db      = require('../models/db');
-const { normalizeSymbol, round } = require('../services/indianMarketData');
+const store   = require('../services/store');
+const auth    = require('../services/authService');
+const { round } = require('../services/indianMarketData');
 const mds = require('../services/marketDataService');
 
 // Batch-enrich all holdings with ONE price API call instead of 24
@@ -53,7 +54,7 @@ async function enrichAllHoldings(rawHoldings) {
 // GET /api/portfolio
 router.get('/', async (req, res) => {
   try {
-    const raw      = db.portfolio.findAll();
+    const raw      = await store.getHoldings(auth.currentEmail(req));
     const holdings = await enrichAllHoldings(raw);
 
     const totalValue = holdings.reduce((s,h) => s + h.totalValue, 0);
@@ -92,9 +93,8 @@ router.post('/', async (req, res) => {
     if (!ticker || !shares || !avgBuyPrice)
       return res.status(400).json({ error: 'ticker, shares, and avgBuyPrice are required' });
 
-    const holding = db.portfolio.create({
-      ticker: normalizeSymbol(ticker),
-      shares: +shares, avgBuyPrice: +avgBuyPrice,
+    const holding = await store.addHolding(auth.currentEmail(req), {
+      ticker, shares: +shares, avgBuyPrice: +avgBuyPrice,
       purchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
       notes: notes || '',
     });
@@ -113,7 +113,7 @@ router.post('/import', async (req, res) => {
     const { holdings, mode } = req.body;
     if (!Array.isArray(holdings) || !holdings.length)
       return res.status(400).json({ error: 'holdings must be a non-empty array' });
-    const saved    = db.portfolio.importMany(holdings, mode === 'append' ? 'append' : 'replace');
+    const saved    = await store.importHoldings(auth.currentEmail(req), holdings, mode === 'append' ? 'append' : 'replace');
     const enriched = await enrichAllHoldings(saved);
     res.status(201).json({ imported: holdings.length, saved: enriched.length, holdings: enriched });
   } catch (err) {
@@ -122,9 +122,9 @@ router.post('/import', async (req, res) => {
 });
 
 // DELETE /api/portfolio/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const deleted = db.portfolio.delete(req.params.id);
+    const deleted = await store.deleteHolding(auth.currentEmail(req), req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Holding not found' });
     res.json({ success: true });
   } catch (err) {
@@ -135,7 +135,7 @@ router.delete('/:id', (req, res) => {
 // PUT /api/portfolio/:id
 router.put('/:id', async (req, res) => {
   try {
-    const updated = db.portfolio.update(req.params.id, req.body);
+    const updated = await store.updateHolding(auth.currentEmail(req), req.params.id, req.body);
     if (!updated) return res.status(404).json({ error: 'Holding not found' });
     const [enriched] = await enrichAllHoldings([updated]);
     res.json(enriched);

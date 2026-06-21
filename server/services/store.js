@@ -1,0 +1,237 @@
+/**
+ * store.js — per-user data layer (users, holdings, watchlist)
+ *
+ * Two interchangeable backends, auto-selected:
+ *   - Postgres  when DATABASE_URL is set (durable; required for real customers)
+ *   - In-memory otherwise (works with zero setup, but wiped on restart)
+ *
+ * All data is keyed by the user's lowercased email, so every account has its own
+ * isolated portfolio and watchlist. The owner email + the local fallback user are
+ * seeded with the original holdings; brand-new users start empty.
+ */
+
+const crypto = require('crypto');
+const { normalizeSymbol } = require('./indianMarketData');
+
+const OWNER_EMAIL = (process.env.OWNER_EMAIL || 'abhishekb15@gmail.com').toLowerCase();
+const LOCAL_USER  = 'local@local';   // used when auth is disabled (single-user/local mode)
+
+// Original seed portfolio — applied to the owner + local user only.
+const SEED_HOLDINGS = [
+  { ticker:'OIL.NS',        shares:4500,   avgBuyPrice:245.54,  notes:'Oil India Ltd' },
+  { ticker:'WEBELSOLAR.NS', shares:18000,  avgBuyPrice:40.25,   notes:'Webel Solar' },
+  { ticker:'STEELCAS.NS',   shares:4950,   avgBuyPrice:131.00,  notes:'Steelcast Ltd' },
+  { ticker:'NATCOPHARM.NS', shares:990,    avgBuyPrice:1142.00, notes:'Natco Pharma' },
+  { ticker:'RISHABH.NS',    shares:2430,   avgBuyPrice:437.20,  notes:'Rishabh Instruments' },
+  { ticker:'PTC.NS',        shares:5400,   avgBuyPrice:193.00,  notes:'PTC India' },
+  { ticker:'AIIL.NS',       shares:2250,   avgBuyPrice:273.00,  notes:'AIIL' },
+  { ticker:'JGCHEM.NS',     shares:2700,   avgBuyPrice:233.33,  notes:'JG Chemicals' },
+  { ticker:'IREDA.NS',      shares:8100,   avgBuyPrice:127.36,  notes:'IREDA' },
+  { ticker:'GMDCLTD.NS',    shares:1500,   avgBuyPrice:426.32,  notes:'GMDC Ltd' },
+  { ticker:'AFIL.NS',       shares:108000, avgBuyPrice:8.10,    notes:'AFIL' },
+  { ticker:'MSTCLTD.NS',    shares:2250,   avgBuyPrice:480.40,  notes:'MSTC Ltd' },
+  { ticker:'UJJIVANSFB.NS', shares:15000,  avgBuyPrice:33.77,   notes:'Ujjivan Small Finance Bank' },
+  { ticker:'AEROENTER.NS',  shares:8100,   avgBuyPrice:100.26,  notes:'Aeroflex Industries' },
+  { ticker:'HUDCO.NS',      shares:3600,   avgBuyPrice:117.46,  notes:'HUDCO' },
+  { ticker:'GNA.NS',        shares:1800,   avgBuyPrice:409.34,  notes:'GNA Axles' },
+  { ticker:'UNIMECH.NS',    shares:630,    avgBuyPrice:954.00,  notes:'Unimech Aerospace' },
+  { ticker:'LIKHITHA.NS',   shares:2700,   avgBuyPrice:313.48,  notes:'Likhitha Infrastructure' },
+  { ticker:'IRCON.NS',      shares:3600,   avgBuyPrice:225.83,  notes:'IRCON International' },
+  { ticker:'504132.BO',     shares:540,    avgBuyPrice:1060.72, notes:'Permanent Magnet' },
+  { ticker:'TMCV.NS',       shares:1080,   avgBuyPrice:364.70,  notes:'TMCV' },
+  { ticker:'PROTEAN.NS',    shares:540,    avgBuyPrice:1284.20, notes:'Protean eGov Technologies' },
+  { ticker:'VIKASLIFE.NS',  shares:180000, avgBuyPrice:4.30,    notes:'Vikas LifeCare' },
+  { ticker:'UTKARSHBNK.NS', shares:17446,  avgBuyPrice:38.63,   notes:'Utkarsh Small Finance Bank' },
+];
+
+function normHolding(d) {
+  return {
+    id:           d.id || crypto.randomUUID(),
+    ticker:       normalizeSymbol(d.ticker || d.symbol),
+    shares:       Number(d.shares || d.quantity || d.qty || 0),
+    avgBuyPrice:  Number(d.avgBuyPrice || d.buyPrice || d.averagePrice || d.avg_price || 0),
+    purchaseDate: d.purchaseDate || d.date || '2024-01-01',
+    notes:        d.notes || '',
+    createdAt:    d.createdAt || new Date().toISOString(),
+  };
+}
+const isSeedUser = (email) => email === OWNER_EMAIL || email === LOCAL_USER;
+
+const USE_PG = !!process.env.DATABASE_URL;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-memory backend
+// ─────────────────────────────────────────────────────────────────────────────
+const mem = { users: new Map(), holdings: new Map(), watch: new Map() };  // email -> …
+
+const memBackend = {
+  async init() {
+    await this.ensureUser(LOCAL_USER, { name: 'Local' });
+  },
+  async ensureUser(email, profile = {}) {
+    if (!mem.users.has(email)) {
+      mem.users.set(email, { email, name: profile.name || null, picture: profile.picture || null,
+        provider: profile.provider || null, passwordHash: profile.passwordHash || null,
+        createdAt: new Date().toISOString() });
+      mem.holdings.set(email, isSeedUser(email) ? SEED_HOLDINGS.map(normHolding) : []);
+      mem.watch.set(email, []);
+    } else if (profile.name || profile.picture || profile.passwordHash) {
+      const u = mem.users.get(email);
+      if (profile.name) u.name = profile.name;
+      if (profile.picture) u.picture = profile.picture;
+      if (profile.passwordHash) u.passwordHash = profile.passwordHash;
+      if (profile.provider) u.provider = profile.provider;
+    }
+    return mem.users.get(email);
+  },
+  async getUser(email)            { return mem.users.get(email) || null; },
+
+  async getHoldings(email)        { await this.ensureUser(email); return [...(mem.holdings.get(email) || [])]; },
+  async addHolding(email, data)   { await this.ensureUser(email); const h = normHolding(data); mem.holdings.get(email).push(h); return h; },
+  async updateHolding(email, id, data) {
+    await this.ensureUser(email);
+    const arr = mem.holdings.get(email); const i = arr.findIndex(h => h.id === id);
+    if (i === -1) return null;
+    arr[i] = { ...arr[i], ...data,
+      ticker: data.ticker ? normalizeSymbol(data.ticker) : arr[i].ticker,
+      shares: data.shares !== undefined ? Number(data.shares) : arr[i].shares,
+      avgBuyPrice: data.avgBuyPrice !== undefined ? Number(data.avgBuyPrice) : arr[i].avgBuyPrice };
+    return arr[i];
+  },
+  async deleteHolding(email, id)  { await this.ensureUser(email); const arr = mem.holdings.get(email); const i = arr.findIndex(h => h.id === id); if (i === -1) return false; arr.splice(i, 1); return true; },
+  async importHoldings(email, holdings, mode) {
+    await this.ensureUser(email);
+    const norm = holdings.map(normHolding).filter(h => h.shares > 0 && Number.isFinite(h.avgBuyPrice));
+    mem.holdings.set(email, mode === 'append' ? [...mem.holdings.get(email), ...norm] : norm);
+    return [...mem.holdings.get(email)];
+  },
+
+  async getWatchlist(email)       { await this.ensureUser(email); return [...(mem.watch.get(email) || [])]; },
+  async addWatch(email, data) {
+    await this.ensureUser(email);
+    const ticker = normalizeSymbol(data.ticker);
+    const arr = mem.watch.get(email);
+    const existing = arr.find(w => w.ticker === ticker);
+    if (existing) { if (data.note != null) existing.note = data.note; if (data.targetPrice != null) existing.targetPrice = Number(data.targetPrice); return existing; }
+    const item = { id: crypto.randomUUID(), ticker, note: data.note || '', targetPrice: data.targetPrice != null ? Number(data.targetPrice) : null, addedAt: new Date().toISOString() };
+    arr.unshift(item); return item;
+  },
+  async updateWatch(email, id, data) {
+    await this.ensureUser(email);
+    const item = mem.watch.get(email).find(w => w.id === id); if (!item) return null;
+    if (data.note !== undefined) item.note = data.note;
+    if (data.targetPrice !== undefined) item.targetPrice = data.targetPrice != null ? Number(data.targetPrice) : null;
+    return item;
+  },
+  async deleteWatch(email, id)    { await this.ensureUser(email); const arr = mem.watch.get(email); const i = arr.findIndex(w => w.id === id); if (i === -1) return false; arr.splice(i, 1); return true; },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Postgres backend
+// ─────────────────────────────────────────────────────────────────────────────
+let pool;
+const pgBackend = {
+  async init() {
+    const { Pool } = require('pg');
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 5 });
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        email TEXT PRIMARY KEY, name TEXT, picture TEXT, provider TEXT,
+        password_hash TEXT, seeded BOOLEAN DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT now());
+      CREATE TABLE IF NOT EXISTS holdings (
+        id UUID PRIMARY KEY, user_email TEXT NOT NULL, ticker TEXT NOT NULL,
+        shares DOUBLE PRECISION NOT NULL, avg_buy_price DOUBLE PRECISION NOT NULL,
+        purchase_date TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT now());
+      CREATE INDEX IF NOT EXISTS holdings_user ON holdings(user_email);
+      CREATE TABLE IF NOT EXISTS watchlist (
+        id UUID PRIMARY KEY, user_email TEXT NOT NULL, ticker TEXT NOT NULL,
+        note TEXT, target_price DOUBLE PRECISION, added_at TIMESTAMPTZ DEFAULT now());
+      CREATE INDEX IF NOT EXISTS watchlist_user ON watchlist(user_email);`);
+    await this.ensureUser(LOCAL_USER, { name: 'Local' });
+  },
+  async ensureUser(email, profile = {}) {
+    const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
+    if (!rows.length) {
+      await pool.query('INSERT INTO users(email,name,picture,provider,password_hash,seeded) VALUES($1,$2,$3,$4,$5,$6)',
+        [email, profile.name || null, profile.picture || null, profile.provider || null, profile.passwordHash || null, isSeedUser(email)]);
+      if (isSeedUser(email)) {
+        for (const s of SEED_HOLDINGS) { const h = normHolding(s);
+          await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
+            [h.id, email, h.ticker, h.shares, h.avgBuyPrice, h.purchaseDate, h.notes]); }
+      }
+      return (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+    }
+    const u = rows[0], sets = [], vals = [];
+    if (profile.name && !u.name)         { sets.push(`name=$${sets.length + 2}`); vals.push(profile.name); }
+    if (profile.picture)                 { sets.push(`picture=$${sets.length + 2}`); vals.push(profile.picture); }
+    if (profile.passwordHash)            { sets.push(`password_hash=$${sets.length + 2}`); vals.push(profile.passwordHash); }
+    if (profile.provider && !u.provider) { sets.push(`provider=$${sets.length + 2}`); vals.push(profile.provider); }
+    if (sets.length) await pool.query(`UPDATE users SET ${sets.join(',')} WHERE email=$1`, [email, ...vals]);
+    return u;
+  },
+  async getUser(email) { const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]); if (!rows.length) return null;
+    const u = rows[0]; return { email: u.email, name: u.name, picture: u.picture, provider: u.provider, passwordHash: u.password_hash, createdAt: u.created_at }; },
+
+  _mapH: (r) => ({ id: r.id, ticker: r.ticker, shares: Number(r.shares), avgBuyPrice: Number(r.avg_buy_price), purchaseDate: r.purchase_date, notes: r.notes, createdAt: r.created_at }),
+  async getHoldings(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM holdings WHERE user_email=$1 ORDER BY created_at', [email]); return rows.map(this._mapH); },
+  async addHolding(email, data) { await this.ensureUser(email); const h = normHolding(data);
+    await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [h.id, email, h.ticker, h.shares, h.avgBuyPrice, h.purchaseDate, h.notes]); return h; },
+  async updateHolding(email, id, data) {
+    await this.ensureUser(email);
+    const { rows } = await pool.query('SELECT * FROM holdings WHERE id=$1 AND user_email=$2', [id, email]);
+    if (!rows.length) return null; const cur = this._mapH(rows[0]);
+    const ticker = data.ticker ? normalizeSymbol(data.ticker) : cur.ticker;
+    const shares = data.shares !== undefined ? Number(data.shares) : cur.shares;
+    const price  = data.avgBuyPrice !== undefined ? Number(data.avgBuyPrice) : cur.avgBuyPrice;
+    const notes  = data.notes !== undefined ? data.notes : cur.notes;
+    await pool.query('UPDATE holdings SET ticker=$1,shares=$2,avg_buy_price=$3,notes=$4 WHERE id=$5 AND user_email=$6', [ticker, shares, price, notes, id, email]);
+    return { ...cur, ticker, shares, avgBuyPrice: price, notes };
+  },
+  async deleteHolding(email, id) { const { rowCount } = await pool.query('DELETE FROM holdings WHERE id=$1 AND user_email=$2', [id, email]); return rowCount > 0; },
+  async importHoldings(email, holdings, mode) {
+    await this.ensureUser(email);
+    const norm = holdings.map(normHolding).filter(h => h.shares > 0 && Number.isFinite(h.avgBuyPrice));
+    if (mode !== 'append') await pool.query('DELETE FROM holdings WHERE user_email=$1', [email]);
+    for (const h of norm) await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [h.id, email, h.ticker, h.shares, h.avgBuyPrice, h.purchaseDate, h.notes]);
+    return this.getHoldings(email);
+  },
+
+  _mapW: (r) => ({ id: r.id, ticker: r.ticker, note: r.note, targetPrice: r.target_price != null ? Number(r.target_price) : null, addedAt: r.added_at }),
+  async getWatchlist(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM watchlist WHERE user_email=$1 ORDER BY added_at DESC', [email]); return rows.map(this._mapW); },
+  async addWatch(email, data) {
+    await this.ensureUser(email); const ticker = normalizeSymbol(data.ticker);
+    const { rows } = await pool.query('SELECT * FROM watchlist WHERE user_email=$1 AND ticker=$2', [email, ticker]);
+    if (rows.length) { await pool.query('UPDATE watchlist SET note=COALESCE($1,note), target_price=COALESCE($2,target_price) WHERE id=$3',
+      [data.note ?? null, data.targetPrice != null ? Number(data.targetPrice) : null, rows[0].id]);
+      return this._mapW((await pool.query('SELECT * FROM watchlist WHERE id=$1', [rows[0].id])).rows[0]); }
+    const id = crypto.randomUUID();
+    await pool.query('INSERT INTO watchlist(id,user_email,ticker,note,target_price) VALUES($1,$2,$3,$4,$5)',
+      [id, email, ticker, data.note || '', data.targetPrice != null ? Number(data.targetPrice) : null]);
+    return { id, ticker, note: data.note || '', targetPrice: data.targetPrice != null ? Number(data.targetPrice) : null, addedAt: new Date().toISOString() };
+  },
+  async updateWatch(email, id, data) {
+    await this.ensureUser(email);
+    const { rows } = await pool.query('SELECT * FROM watchlist WHERE id=$1 AND user_email=$2', [id, email]); if (!rows.length) return null;
+    const note = data.note !== undefined ? data.note : rows[0].note;
+    const tp   = data.targetPrice !== undefined ? (data.targetPrice != null ? Number(data.targetPrice) : null) : rows[0].target_price;
+    await pool.query('UPDATE watchlist SET note=$1,target_price=$2 WHERE id=$3', [note, tp, id]);
+    return this._mapW({ ...rows[0], note, target_price: tp });
+  },
+  async deleteWatch(email, id) { const { rowCount } = await pool.query('DELETE FROM watchlist WHERE id=$1 AND user_email=$2', [id, email]); return rowCount > 0; },
+};
+
+const backend = USE_PG ? pgBackend : memBackend;
+let _ready;
+function init() { _ready = _ready || backend.init().then(() => console.log(`🗄️  Data store: ${USE_PG ? 'Postgres (durable)' : 'in-memory (ephemeral)'}`)); return _ready; }
+
+module.exports = new Proxy(backend, {
+  get(t, p) {
+    if (p === 'init') return init;
+    if (p === 'OWNER_EMAIL') return OWNER_EMAIL;
+    if (p === 'LOCAL_USER') return LOCAL_USER;
+    if (p === 'isPostgres') return USE_PG;
+    return t[p] ? t[p].bind(t) : undefined;
+  },
+});

@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
-const db      = require('../models/db');
+const store   = require('../services/store');
+const auth    = require('../services/authService');
 const mds     = require('../services/marketDataService');
 const { getVolumeSignal, mapLimit } = require('../services/volumeService');
 const { normalizeSymbol, displaySymbol, round } = require('../services/indianMarketData');
@@ -34,7 +35,7 @@ async function enrich(item) {
 // GET /api/watchlist
 router.get('/', async (req, res) => {
   try {
-    const items = db.watchlist.findAll();
+    const items = await store.getWatchlist(auth.currentEmail(req));
     const enriched = await mapLimit(items, 6, enrich);
     res.json({ items: enriched.filter(Boolean), count: items.length });
   } catch (err) {
@@ -52,7 +53,7 @@ router.post('/', async (req, res) => {
     try { await mds.getQuote(sym); }
     catch { return res.status(404).json({ error: `Could not find a quote for ${displaySymbol(sym)}` }); }
 
-    const item = db.watchlist.create({ ticker: sym, note, targetPrice });
+    const item = await store.addWatch(auth.currentEmail(req), { ticker: sym, note, targetPrice });
     res.status(201).json(await enrich(item));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -62,7 +63,7 @@ router.post('/', async (req, res) => {
 // PUT /api/watchlist/:id  { note?, targetPrice? }
 router.put('/:id', async (req, res) => {
   try {
-    const updated = db.watchlist.update(req.params.id, req.body);
+    const updated = await store.updateWatch(auth.currentEmail(req), req.params.id, req.body);
     if (!updated) return res.status(404).json({ error: 'Watchlist item not found' });
     res.json(await enrich(updated));
   } catch (err) {
@@ -71,9 +72,9 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/watchlist/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const ok = db.watchlist.delete(req.params.id);
+    const ok = await store.deleteWatch(auth.currentEmail(req), req.params.id);
     if (!ok) return res.status(404).json({ error: 'Watchlist item not found' });
     res.json({ success: true });
   } catch (err) {

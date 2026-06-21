@@ -15,6 +15,7 @@ const analysisRoutes = require('./routes/analysis');
 
 const { initScheduler } = require('./jobs/scheduler');
 const auth = require('./services/authService');
+const store = require('./services/store');
 
 const app = express();
 app.set('trust proxy', 1);   // Render runs behind a proxy (needed for secure cookies / proto)
@@ -103,5 +104,6 @@ app.listen(PORT, () => {
   } else {
     console.log('⚠️  No React build found. Run: cd client && npm run build');
   }
+  store.init().catch(e => console.error('Store init failed:', e.message));
   initScheduler();
 });

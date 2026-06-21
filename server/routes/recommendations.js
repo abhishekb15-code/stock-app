@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
-const db      = require('../models/db');
+const store   = require('../services/store');
+const auth    = require('../services/authService');
 const { round } = require('../services/indianMarketData');
 const { clientReport } = require('../services/analysisEngine');
 
@@ -12,7 +13,7 @@ const ACTION_KEY = { 'BUY MORE': 'buy', 'HOLD': 'hold', 'TRIM': 'trim', 'SELL': 
 // clientReport is cached (5 min), so this is cheap after the first call.
 router.get('/', async (req, res) => {
   try {
-    const holdings = db.portfolio.findAll();
+    const holdings = await store.getHoldings(auth.currentEmail(req));
     if (!holdings.length) return res.json({ recommendations: [], generatedAt: new Date().toISOString() });
 
     const report = await clientReport(holdings);
@@ -35,9 +36,6 @@ router.get('/', async (req, res) => {
         livePrice:      h.dataAvailable !== false,
       };
     });
-
-    db.recommendations.clear();
-    recs.forEach(r => db.recommendations.upsert(r));
 
     res.json({ recommendations: recs, generatedAt: report.generatedAt });
   } catch (err) {

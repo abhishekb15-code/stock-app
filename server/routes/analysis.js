@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
-const db      = require('../models/db');
+const store   = require('../services/store');
+const auth    = require('../services/authService');
 const {
   earningsAnalysis,
   financialStatements,
@@ -59,7 +60,7 @@ router.get('/sector/:sector', async (req, res) => {
 // GET /api/analysis/report — full portfolio client report
 router.get('/report', async (req, res) => {
   try {
-    const holdings = db.portfolio.findAll();
+    const holdings = await store.getHoldings(auth.currentEmail(req));
     if (!holdings.length) return res.status(400).json({ error: 'No holdings in portfolio' });
     const report = await clientReport(holdings);
     res.json(report);

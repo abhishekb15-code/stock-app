@@ -29,7 +29,7 @@ export default function App() {
     );
   }
 
-  if (auth.authEnabled && !auth.authenticated) return <Login />;
+  if (auth.authEnabled && !auth.authenticated) return <Login googleEnabled={auth.googleEnabled} />;
 
   return (
     <BrowserRouter>

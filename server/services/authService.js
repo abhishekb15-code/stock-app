@@ -29,16 +29,38 @@ const cfg = {
   isProd:       process.env.NODE_ENV === 'production' || !!process.env.RENDER,
 };
 
+// Auth is ON whenever we can sign sessions (email/password works with just JWT_SECRET).
 function isConfigured() {
-  return !!(cfg.clientId && cfg.clientSecret && cfg.jwtSecret && cfg.allowed.length);
+  return !!cfg.jwtSecret;
+}
+// Google is an additional option, only when its credentials are present.
+function googleConfigured() {
+  return !!(cfg.clientId && cfg.clientSecret && cfg.jwtSecret);
 }
 
-// "*" allows any verified Google account (multi-tenant mode); otherwise allowlist.
+// Open signup (any email) when no allowlist is set or it contains "*".
+// Otherwise restrict to the allow-listed emails.
 function isAllowed(email) {
   if (!email) return false;
-  if (cfg.allowed.includes('*')) return true;
+  if (!cfg.allowed.length || cfg.allowed.includes('*')) return true;
   return cfg.allowed.includes(email.toLowerCase());
 }
+
+// ── Password hashing (scrypt — no external deps) ───────────────────────────────
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  const test = crypto.scryptSync(password, salt, 64);
+  const ref  = Buffer.from(hash, 'hex');
+  return test.length === ref.length && crypto.timingSafeEqual(test, ref);
+}
+const normalizeEmail = (e) => (e || '').trim().toLowerCase();
+const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 
 // ── Tiny JWT (HMAC-SHA256) ─────────────────────────────────────────────────────
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
@@ -140,6 +162,12 @@ function currentUser(req) {
   return verify(parseCookies(req)[COOKIE_NAME] || '');
 }
 
+// The email that scopes a request's data. Falls back to the single local user
+// when auth is disabled (local/single-user mode).
+function currentEmail(req) {
+  return ((req.user && req.user.email) || 'local@local').toLowerCase();
+}
+
 // Middleware — enforces auth only when configured.
 function requireAuth(req, res, next) {
   if (!isConfigured()) return next();        // not set up yet → app stays open
@@ -150,6 +178,7 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = {
-  cfg, isConfigured, isAllowed, googleAuthUrl, exchangeCode, issueSession,
+  cfg, isConfigured, googleConfigured, isAllowed, googleAuthUrl, exchangeCode, issueSession,
   clearSession, currentUser, requireAuth, parseCookies, COOKIE_NAME,
+  hashPassword, verifyPassword, normalizeEmail, validEmail, currentEmail,
 };
