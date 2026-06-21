@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Plus, Trash2, Download, X, ExternalLink, Upload, AlertCircle, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Download, X, ExternalLink, Upload, AlertCircle, RefreshCw, Pencil } from 'lucide-react';
 
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signedMoney = (v) => `${v >= 0 ? '+' : '-'}${money(Math.abs(v))}`;
 
-function AddModal({ onClose, onSave }) {
-  const [form, setForm]     = useState({ ticker: '', shares: '', avgBuyPrice: '', purchaseDate: '', notes: '' });
+function HoldingModal({ onClose, onSave, holding }) {
+  const isEdit = !!holding;
+  const [form, setForm] = useState(() => isEdit
+    ? { ticker: holding.displayTicker || holding.ticker, shares: String(holding.shares ?? ''), avgBuyPrice: String(holding.avgBuyPrice ?? ''), purchaseDate: holding.purchaseDate || '', notes: holding.notes || '' }
+    : { ticker: '', shares: '', avgBuyPrice: '', purchaseDate: '', notes: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState('');
 
@@ -20,17 +23,26 @@ function AddModal({ onClose, onSave }) {
 
     setLoading(true); setError('');
     try {
-      await axios.post('/api/portfolio', {
-        ticker:       form.ticker.trim().toUpperCase(),
-        shares:       +form.shares,
-        avgBuyPrice:  +form.avgBuyPrice,
-        purchaseDate: form.purchaseDate || new Date().toISOString().split('T')[0],
-        notes:        form.notes,
-      });
+      if (isEdit) {
+        await axios.put(`/api/portfolio/${holding.id}`, {
+          shares:       +form.shares,
+          avgBuyPrice:  +form.avgBuyPrice,
+          purchaseDate: form.purchaseDate || holding.purchaseDate,
+          notes:        form.notes,
+        });
+      } else {
+        await axios.post('/api/portfolio', {
+          ticker:       form.ticker.trim().toUpperCase(),
+          shares:       +form.shares,
+          avgBuyPrice:  +form.avgBuyPrice,
+          purchaseDate: form.purchaseDate || new Date().toISOString().split('T')[0],
+          notes:        form.notes,
+        });
+      }
       onClose();
       onSave();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to add. Is the server running?');
+      setError(err.response?.data?.error || `Failed to ${isEdit ? 'save' : 'add'}. Is the server running?`);
       setLoading(false);
     }
   };
@@ -42,21 +54,28 @@ function AddModal({ onClose, onSave }) {
     >
       <div className="card" style={{ width: 460, padding: 28 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <span style={{ fontWeight: 700, fontSize: 17, color: 'var(--text-primary)' }}>Add Holding</span>
+          <span style={{ fontWeight: 700, fontSize: 17, color: 'var(--text-primary)' }}>{isEdit ? `Edit ${form.ticker}` : 'Add Holding'}</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 22 }}>×</button>
         </div>
+
+        {isEdit && (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, marginTop: -8 }}>
+            Update your quantity and average buy price after buying more or selling part of the position.
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ gridColumn: '1/-1' }}>
             <label className="label">NSE Symbol *</label>
-            <input className="input" placeholder="e.g. RELIANCE" value={form.ticker} onChange={set('ticker')} style={{ width: '100%', boxSizing: 'border-box', textTransform: 'uppercase' }} />
+            <input className="input" placeholder="e.g. RELIANCE" value={form.ticker} onChange={set('ticker')} readOnly={isEdit}
+              style={{ width: '100%', boxSizing: 'border-box', textTransform: 'uppercase', opacity: isEdit ? 0.6 : 1, cursor: isEdit ? 'not-allowed' : 'text' }} />
           </div>
           <div>
             <label className="label">Shares *</label>
-            <input className="input" type="number" min="1" step="1" placeholder="100" value={form.shares} onChange={set('shares')} style={{ width: '100%', boxSizing: 'border-box' }} />
+            <input className="input" type="number" min="1" step="1" placeholder="100" value={form.shares} onChange={set('shares')} autoFocus={isEdit} style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
           <div>
-            <label className="label">Buy Price (₹) *</label>
+            <label className="label">Avg Buy Price (₹) *</label>
             <input className="input" type="number" min="0" step="0.01" placeholder="2850.00" value={form.avgBuyPrice} onChange={set('avgBuyPrice')} style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
           <div>
@@ -77,7 +96,7 @@ function AddModal({ onClose, onSave }) {
 
         <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
           <button onClick={handleSubmit} disabled={loading} className="btn btn-primary" style={{ flex: 1, justifyContent: 'center', opacity: loading ? 0.7 : 1 }}>
-            {loading ? '⏳ Adding...' : '✓ Add Holding'}
+            {loading ? (isEdit ? '⏳ Saving...' : '⏳ Adding...') : (isEdit ? '✓ Save Changes' : '✓ Add Holding')}
           </button>
           <button onClick={onClose} className="btn btn-ghost" disabled={loading}>Cancel</button>
         </div>
@@ -93,6 +112,7 @@ export default function Portfolio() {
   const [error, setError] = useState(null);
   const [liveMode, setLiveMode] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editHolding, setEditHolding] = useState(null);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
@@ -266,6 +286,9 @@ export default function Portfolio() {
                         <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => navigate(`/stock/${h.ticker}`)}>
                           <ExternalLink size={11} /> Analyze
                         </button>
+                        <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }} title="Edit quantity / buy price" onClick={() => setEditHolding(h)}>
+                          <Pencil size={11} />
+                        </button>
                         <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => handleDelete(h.id)}>
                           <Trash2 size={11} />
                         </button>
@@ -279,7 +302,13 @@ export default function Portfolio() {
         </div>
       </div>
 
-      {showModal && <AddModal onClose={() => setShowModal(false)} onSave={load} />}
+      {(showModal || editHolding) && (
+        <HoldingModal
+          holding={editHolding}
+          onClose={() => { setShowModal(false); setEditHolding(null); }}
+          onSave={load}
+        />
+      )}
     </div>
   );
 }
