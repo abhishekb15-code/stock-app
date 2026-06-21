@@ -142,11 +142,12 @@ export default function SuperInvestors() {
                 style={{
                   textAlign: 'left', cursor: i.error ? 'not-allowed' : 'pointer', minWidth: 150, maxWidth: 210,
                   background: selected === i.key ? 'var(--bg-600)' : 'var(--bg-800)',
-                  border: `1px solid ${selected === i.key ? 'var(--blue)' : 'var(--border)'}`,
+                  border: `1px solid ${selected === i.key ? 'var(--blue)' : 'var(--border-bright)'}`,
                   borderRadius: 10, padding: '10px 14px', opacity: i.error ? 0.5 : 1,
+                  color: 'var(--text-primary)',
                 }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{i.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{i.fund}</div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{i.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{i.fund}</div>
                 {!i.error && (
                   <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>
                     {india ? `${i.holdingsCount} holdings` : `${i.totalValueFmt} · ${i.holdingsCount} pos`}
