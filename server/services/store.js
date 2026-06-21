@@ -73,6 +73,7 @@ const memBackend = {
       mem.users.set(email, { email, name: profile.name || null, picture: profile.picture || null,
         provider: profile.provider || null, passwordHash: profile.passwordHash || null,
         emailVerified: !!profile.emailVerified || isSeedUser(email),
+        phone: profile.phone || null,
         verifyToken: null, verifyExpires: 0, resetToken: null, resetExpires: 0,
         plan: isSeedUser(email) ? 'pro' : 'free', planStatus: isSeedUser(email) ? 'active' : null,
         billingProvider: null, subscriptionId: null, currentPeriodEnd: null,
@@ -119,6 +120,13 @@ const memBackend = {
     if (sub.currentPeriodEnd !== undefined) u.currentPeriodEnd = sub.currentPeriodEnd;
     return this.getSubscription(email); },
   async findBySubscriptionId(subId) { for (const u of mem.users.values()) if (u.subscriptionId === subId) return u.email; return null; },
+
+  async getProfile(email) { const u = await this.ensureUser(email);
+    return { email: u.email, name: u.name, phone: u.phone || null, picture: u.picture, provider: u.provider, emailVerified: !!u.emailVerified, createdAt: u.createdAt }; },
+  async updateProfile(email, data) { const u = await this.ensureUser(email);
+    if (data.name  !== undefined) u.name  = data.name;
+    if (data.phone !== undefined) u.phone = data.phone;
+    return this.getProfile(email); },
 
   async getHoldings(email)        { await this.ensureUser(email); return [...(mem.holdings.get(email) || [])]; },
   async addHolding(email, data)   { await this.ensureUser(email); const h = normHolding(data); mem.holdings.get(email).push(h); return h; },
@@ -190,7 +198,8 @@ const pgBackend = {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_status TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_provider TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id TEXT;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end BIGINT;`);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end BIGINT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
     await this.ensureUser(LOCAL_USER, { name: 'Local' });
   },
   async ensureUser(email, profile = {}) {
@@ -244,6 +253,16 @@ const pgBackend = {
     if (sets.length) await pool.query(`UPDATE users SET ${sets.join(',')} WHERE email=$1`, [email, ...vals]);
     return this.getSubscription(email); },
   async findBySubscriptionId(subId) { const { rows } = await pool.query('SELECT email FROM users WHERE subscription_id=$1', [subId]); return rows.length ? rows[0].email : null; },
+
+  async getProfile(email) { await this.ensureUser(email);
+    const { rows } = await pool.query('SELECT email, name, phone, picture, provider, email_verified, created_at FROM users WHERE email=$1', [email]);
+    const u = rows[0] || {}; return { email: u.email, name: u.name, phone: u.phone || null, picture: u.picture, provider: u.provider, emailVerified: !!u.email_verified, createdAt: u.created_at }; },
+  async updateProfile(email, data) { await this.ensureUser(email);
+    const sets = [], vals = [];
+    if (data.name  !== undefined) { sets.push(`name=$${sets.length + 2}`);  vals.push(data.name); }
+    if (data.phone !== undefined) { sets.push(`phone=$${sets.length + 2}`); vals.push(data.phone); }
+    if (sets.length) await pool.query(`UPDATE users SET ${sets.join(',')} WHERE email=$1`, [email, ...vals]);
+    return this.getProfile(email); },
 
   _mapH: (r) => ({ id: r.id, ticker: r.ticker, shares: Number(r.shares), avgBuyPrice: Number(r.avg_buy_price), purchaseDate: r.purchase_date, notes: r.notes, createdAt: r.created_at }),
   async getHoldings(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM holdings WHERE user_email=$1 ORDER BY created_at', [email]); return rows.map(this._mapH); },

@@ -12,6 +12,7 @@ import Login from './pages/Login';
 import VerifyEmail from './pages/VerifyEmail';
 import ResetPassword from './pages/ResetPassword';
 import Pricing from './pages/Pricing';
+import Profile from './pages/Profile';
 import { AuthContext } from './AuthContext';
 
 axios.defaults.withCredentials = true;   // send the session cookie with API calls
@@ -55,6 +56,7 @@ export default function App() {
               <Route path="/whales" element={<WhaleSignals />} />
               <Route path="/investors" element={<SuperInvestors />} />
               <Route path="/pricing" element={<Pricing />} />
+              <Route path="/profile" element={<Profile />} />
             </Routes>
           </main>
         </div>

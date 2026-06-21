@@ -70,7 +70,8 @@ if (auth.isConfigured()) {
 app.use('/api', auth.requireAuth);       // must be signed in
 app.use('/api', auth.requireVerified);   // …and email-verified (when enforced)
 
-// Billing (account/plan) — must be signed in, not Pro-gated
+// Account routes — must be signed in, not Pro-gated
+app.use('/api/profile', require('./routes/profile'));
 app.use('/api/billing', require('./routes/billing'));
 
 // Free API routes
