@@ -74,6 +74,8 @@ const memBackend = {
         provider: profile.provider || null, passwordHash: profile.passwordHash || null,
         emailVerified: !!profile.emailVerified || isSeedUser(email),
         verifyToken: null, verifyExpires: 0, resetToken: null, resetExpires: 0,
+        plan: isSeedUser(email) ? 'pro' : 'free', planStatus: isSeedUser(email) ? 'active' : null,
+        billingProvider: null, subscriptionId: null, currentPeriodEnd: null,
         createdAt: new Date().toISOString() });
       mem.holdings.set(email, isSeedUser(email) ? SEED_HOLDINGS.map(normHolding) : []);
       mem.watch.set(email, []);
@@ -106,6 +108,17 @@ const memBackend = {
     }
     return null;
   },
+
+  async getSubscription(email) { const u = await this.ensureUser(email);
+    return { plan: u.plan || 'free', status: u.planStatus, provider: u.billingProvider, subscriptionId: u.subscriptionId, currentPeriodEnd: u.currentPeriodEnd }; },
+  async setSubscription(email, sub) { const u = await this.ensureUser(email);
+    if (sub.plan !== undefined) u.plan = sub.plan;
+    if (sub.status !== undefined) u.planStatus = sub.status;
+    if (sub.provider !== undefined) u.billingProvider = sub.provider;
+    if (sub.subscriptionId !== undefined) u.subscriptionId = sub.subscriptionId;
+    if (sub.currentPeriodEnd !== undefined) u.currentPeriodEnd = sub.currentPeriodEnd;
+    return this.getSubscription(email); },
+  async findBySubscriptionId(subId) { for (const u of mem.users.values()) if (u.subscriptionId === subId) return u.email; return null; },
 
   async getHoldings(email)        { await this.ensureUser(email); return [...(mem.holdings.get(email) || [])]; },
   async addHolding(email, data)   { await this.ensureUser(email); const h = normHolding(data); mem.holdings.get(email).push(h); return h; },
@@ -172,7 +185,12 @@ const pgBackend = {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_expires BIGINT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires BIGINT;`);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires BIGINT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'free';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_status TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_provider TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end BIGINT;`);
     await this.ensureUser(LOCAL_USER, { name: 'Local' });
   },
   async ensureUser(email, profile = {}) {
@@ -181,6 +199,7 @@ const pgBackend = {
       await pool.query('INSERT INTO users(email,name,picture,provider,password_hash,seeded,email_verified) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [email, profile.name || null, profile.picture || null, profile.provider || null, profile.passwordHash || null, isSeedUser(email), isSeedUser(email) || !!profile.emailVerified]);
       if (isSeedUser(email)) {
+        await pool.query("UPDATE users SET plan='pro', plan_status='active' WHERE email=$1", [email]);
         for (const s of SEED_HOLDINGS) { const h = normHolding(s);
           await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
             [h.id, email, h.ticker, h.shares, h.avgBuyPrice, h.purchaseDate, h.notes]); }
@@ -214,6 +233,17 @@ const pgBackend = {
     await pool.query('UPDATE users SET password_hash=$1, reset_token=NULL, email_verified=TRUE WHERE email=$2', [passwordHash, rows[0].email]);
     return { email: rows[0].email };
   },
+
+  async getSubscription(email) { await this.ensureUser(email);
+    const { rows } = await pool.query('SELECT plan, plan_status, billing_provider, subscription_id, current_period_end FROM users WHERE email=$1', [email]);
+    const u = rows[0] || {}; return { plan: u.plan || 'free', status: u.plan_status, provider: u.billing_provider, subscriptionId: u.subscription_id, currentPeriodEnd: u.current_period_end ? Number(u.current_period_end) : null }; },
+  async setSubscription(email, sub) { await this.ensureUser(email);
+    const map = { plan: 'plan', status: 'plan_status', provider: 'billing_provider', subscriptionId: 'subscription_id', currentPeriodEnd: 'current_period_end' };
+    const sets = [], vals = [];
+    for (const [k, col] of Object.entries(map)) if (sub[k] !== undefined) { sets.push(`${col}=$${sets.length + 2}`); vals.push(sub[k]); }
+    if (sets.length) await pool.query(`UPDATE users SET ${sets.join(',')} WHERE email=$1`, [email, ...vals]);
+    return this.getSubscription(email); },
+  async findBySubscriptionId(subId) { const { rows } = await pool.query('SELECT email FROM users WHERE subscription_id=$1', [subId]); return rows.length ? rows[0].email : null; },
 
   _mapH: (r) => ({ id: r.id, ticker: r.ticker, shares: Number(r.shares), avgBuyPrice: Number(r.avg_buy_price), purchaseDate: r.purchase_date, notes: r.notes, createdAt: r.created_at }),
   async getHoldings(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM holdings WHERE user_email=$1 ORDER BY created_at', [email]); return rows.map(this._mapH); },

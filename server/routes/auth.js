@@ -4,6 +4,7 @@ const router  = express.Router();
 const auth    = require('../services/authService');
 const store   = require('../services/store');
 const { sendVerificationEmail, sendPasswordResetEmail, isEmailConfigured } = require('../services/emailService');
+const billing = require('../services/billingService');
 
 // Throttle credential endpoints to slow brute-force attempts.
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
@@ -25,6 +26,8 @@ router.get('/me', async (req, res) => {
     const u = await store.getUser(sess.email).catch(() => null);
     if (u && u.emailVerified) { verified = true; auth.issueSession(res, { ...sess, verified: true }); }
   }
+  let plan = 'pro', billingEnabled = false;
+  if (sess) { const p = await billing.getPlan(sess.email).catch(() => null); if (p) plan = p.plan; billingEnabled = billing.billingEnabled(); }
   res.json({
     authEnabled:        auth.isConfigured(),
     googleEnabled:      auth.googleConfigured(),
@@ -32,6 +35,8 @@ router.get('/me', async (req, res) => {
     verificationRequired: auth.emailVerificationEnforced(),
     authenticated:      !!sess,
     verified,
+    billingEnabled,
+    plan,
     user: sess ? { email: sess.email, name: sess.name, picture: sess.picture } : null,
   });
 });

@@ -36,6 +36,15 @@ app.use(cors({
     : 'http://localhost:3000',    // dev: allow CRA dev server
 }));
 app.use(morgan('dev'));
+
+const billing = require('./services/billingService');
+// Payment webhooks need the RAW body for signature verification — mount BEFORE
+// the JSON parser and before the auth gate (providers call without our cookie).
+app.post('/api/billing/webhook/:provider', express.raw({ type: '*/*' }), async (req, res) => {
+  try { req.rawBody = req.body.toString('utf8'); await billing.handleWebhook(req.params.provider, req); res.json({ received: true }); }
+  catch (err) { console.warn('Webhook error:', err.message); res.status(400).json({ error: err.message }); }
+});
+
 app.use(express.json());
 
 // Open routes (no auth): health check + auth endpoints themselves
@@ -47,6 +56,7 @@ app.get('/api/health', (req, res) => {
     market: 'India NSE',
     dataProvider: 'yahoo-finance2',
     authEnabled: auth.isConfigured(),
+    billingEnabled: billing.billingEnabled(),
     servesFrontend: hasBuild,
   });
 });
@@ -60,17 +70,23 @@ if (auth.isConfigured()) {
 app.use('/api', auth.requireAuth);       // must be signed in
 app.use('/api', auth.requireVerified);   // …and email-verified (when enforced)
 
-// API Routes
+// Billing (account/plan) — must be signed in, not Pro-gated
+app.use('/api/billing', require('./routes/billing'));
+
+// Free API routes
 app.use('/api/stock', stockRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/whales', whaleRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/recommendations', recommendationRoutes);
-app.use('/api/analysis', analysisRoutes);
 app.use('/api/watchlist', require('./routes/watchlist'));
-app.use('/api/signals', require('./routes/signals'));
-app.use('/api/superinvestors', require('./routes/superinvestors'));
-app.use('/api/indian-investors', require('./routes/indianInvestors'));
+
+// Pro-only API routes (gated when billing is enabled)
+app.use('/api/analysis', billing.requirePro, analysisRoutes);
+app.use('/api/signals', billing.requirePro, require('./routes/signals'));
+app.use('/api/superinvestors', billing.requirePro, require('./routes/superinvestors'));
+app.use('/api/indian-investors', billing.requirePro, require('./routes/indianInvestors'));
+
 app.use('/api/debug', require('./routes/debug'));
 
 // Serve React build (production / local single-port mode)

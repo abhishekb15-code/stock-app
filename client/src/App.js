@@ -11,6 +11,8 @@ import SuperInvestors from './pages/SuperInvestors';
 import Login from './pages/Login';
 import VerifyEmail from './pages/VerifyEmail';
 import ResetPassword from './pages/ResetPassword';
+import Pricing from './pages/Pricing';
+import { AuthContext } from './AuthContext';
 
 axios.defaults.withCredentials = true;   // send the session cookie with API calls
 
@@ -40,20 +42,23 @@ export default function App() {
     return <VerifyEmail email={auth.user?.email} />;
 
   return (
-    <BrowserRouter>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar user={auth.user} />
-        <main style={{ flex: 1, marginLeft: 220, padding: '28px 32px', maxWidth: 'calc(100vw - 220px)' }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/portfolio" element={<Portfolio />} />
-            <Route path="/stock/:ticker" element={<StockDeepDive />} />
-            <Route path="/watchlist" element={<Watchlist />} />
-            <Route path="/whales" element={<WhaleSignals />} />
-            <Route path="/investors" element={<SuperInvestors />} />
-          </Routes>
-        </main>
-      </div>
-    </BrowserRouter>
+    <AuthContext.Provider value={{ plan: auth.plan || 'pro', billingEnabled: !!auth.billingEnabled, user: auth.user, verified: auth.verified }}>
+      <BrowserRouter>
+        <div style={{ display: 'flex', minHeight: '100vh' }}>
+          <Sidebar user={auth.user} />
+          <main style={{ flex: 1, marginLeft: 220, padding: '28px 32px', maxWidth: 'calc(100vw - 220px)' }}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/stock/:ticker" element={<StockDeepDive />} />
+              <Route path="/watchlist" element={<Watchlist />} />
+              <Route path="/whales" element={<WhaleSignals />} />
+              <Route path="/investors" element={<SuperInvestors />} />
+              <Route path="/pricing" element={<Pricing />} />
+            </Routes>
+          </main>
+        </div>
+      </BrowserRouter>
+    </AuthContext.Provider>
   );
 }

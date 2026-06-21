@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { TrendingUp, TrendingDown, DollarSign, PieChart, RefreshCw, AlertCircle, Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { useLocked } from '../AuthContext';
+import UpgradeNotice from '../components/UpgradeNotice';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7'];
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -31,6 +33,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [liveMode, setLiveMode] = useState(true);
   const navigate = useNavigate();
+  const locked = useLocked();
 
   const fetchData = () => {
     setLoading(true);
@@ -43,7 +46,7 @@ export default function Dashboard() {
     }).finally(() => setLoading(false));
     // Recommendations + volume load independently (slower scans) so they don't block the dashboard
     axios.get('/api/recommendations').then(r => setRecs(r.data?.recommendations || [])).catch(() => setRecs([]));
-    axios.get('/api/signals/volume?scope=all').then(v => setVolume(v.data)).catch(() => setVolume(null));
+    if (!locked) axios.get('/api/signals/volume?scope=all').then(v => setVolume(v.data)).catch(() => setVolume(null));
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -161,8 +164,17 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Volume spike highlighter */}
-      <VolumePanel volume={volume} navigate={navigate} />
+      {/* Volume spike highlighter (Pro) */}
+      {locked ? (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Activity size={15} color="var(--blue)" /> Unusual Volume — Smart-Money Activity
+          </div>
+          <UpgradeNotice feature="Smart-money volume signals" compact />
+        </div>
+      ) : (
+        <VolumePanel volume={volume} navigate={navigate} />
+      )}
     </div>
   );
 }

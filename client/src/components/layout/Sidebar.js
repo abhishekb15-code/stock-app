@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown, LogOut } from 'lucide-react';
+import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown, LogOut, Sparkles } from 'lucide-react';
 import axios from 'axios';
+import { useAuth } from '../../AuthContext';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -12,6 +13,7 @@ const navItems = [
 ];
 
 export default function Sidebar({ user }) {
+  const { plan, billingEnabled } = useAuth();
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [emailMsg, setEmailMsg] = useState('');
@@ -104,6 +106,21 @@ export default function Sidebar({ user }) {
           </NavLink>
         ))}
       </nav>
+
+      {/* Plan / upgrade */}
+      {billingEnabled && (
+        <div style={{ padding: '0 16px 12px' }}>
+          {plan === 'pro' ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--blue)', background: 'var(--blue-dim)', border: '1px solid var(--blue)', borderRadius: 8, padding: '7px 10px' }}>
+              <Sparkles size={13} /> PRO
+            </div>
+          ) : (
+            <NavLink to="/pricing" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: 'var(--blue)', borderRadius: 8, padding: '9px 10px', textDecoration: 'none' }}>
+              <Sparkles size={14} /> Upgrade to Pro
+            </NavLink>
+          )}
+        </div>
+      )}
 
       {/* Digest trigger + account */}
       <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>

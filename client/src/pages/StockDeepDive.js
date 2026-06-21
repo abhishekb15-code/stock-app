@@ -7,6 +7,8 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Area, AreaChart, BarChart
 } from 'recharts';
+import { useLocked } from '../AuthContext';
+import UpgradeNotice from '../components/UpgradeNotice';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const money  = (v) => v != null ? `₹${Number(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—';
@@ -521,6 +523,7 @@ export default function StockDeepDive() {
   const [loading,     setLoading]     = useState({});
   const [holding,     setHolding]     = useState(null);
   const [watchState,  setWatchState]  = useState('idle');   // idle | saving | added
+  const locked = useLocked();
 
   const addToWatchlist = async () => {
     setWatchState('saving');
@@ -547,6 +550,7 @@ export default function StockDeepDive() {
   // Lazy-load each tab on first visit
   const loadTab = useCallback(async (t) => {
     setTab(t);
+    if (locked && t !== 'overview') return;   // Pro tabs: show paywall, don't fetch
     if (t === 'earnings' && !earnings) {
       setLoad('earnings', true);
       try { setEarnings((await axios.get(`/api/analysis/earnings/${ticker}`)).data); }
@@ -580,7 +584,7 @@ export default function StockDeepDive() {
       catch { setReport(null); }
       finally { setLoad('report', false); }
     }
-  }, [ticker, earnings, financials, competitive, sectorData, report, stockData]);
+  }, [ticker, earnings, financials, competitive, sectorData, report, stockData, locked]);
 
   const displayTicker = ticker.replace('.NS','').replace('.BO','');
   const isLoading = loading[tab];
@@ -643,6 +647,8 @@ export default function StockDeepDive() {
           <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200, gap:6 }}>
             <span className="loading-dot" /><span className="loading-dot" /><span className="loading-dot" />
           </div>
+        ) : (locked && tab !== 'overview') ? (
+          <UpgradeNotice feature={`${TABS.find(t => t.id === tab)?.label || 'This'} analysis`} />
         ) : (
           <>
             {tab === 'overview'    && <OverviewTab    stockData={stockData || {}} holding={holding} />}

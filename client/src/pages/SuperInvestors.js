@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Crown, RefreshCw, Users, PieChart as PieIcon, TrendingUp, Plus, Minus, X, ArrowUpRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { useLocked } from '../AuthContext';
+import UpgradeNotice from '../components/UpgradeNotice';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7', '#64748b'];
 
@@ -61,6 +63,7 @@ export default function SuperInvestors() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const navigate = useNavigate();
+  const locked = useLocked();
 
   const load = (m, force) => {
     setLoading(true);
@@ -74,6 +77,7 @@ export default function SuperInvestors() {
   };
 
   useEffect(() => {
+    if (locked) { setLoading(false); return; }
     if (byMarket[market]) { setSelected(byMarket[market].investors.find(i => !i.error)?.key || null); setLoading(false); }
     else load(market);
   }, [market]); // eslint-disable-line
@@ -91,6 +95,15 @@ export default function SuperInvestors() {
           {label}
         </button>
       ))}
+    </div>
+  );
+
+  if (locked) return (
+    <div className="fade-in">
+      <h1 style={{ fontSize: 22, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+        <Crown size={20} color="var(--blue)" /> Ace Investors
+      </h1>
+      <UpgradeNotice feature="Ace Investors" />
     </div>
   );
 
