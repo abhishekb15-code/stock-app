@@ -45,7 +45,7 @@ app.post('/api/billing/webhook/:provider', express.raw({ type: '*/*' }), async (
   catch (err) { console.warn('Webhook error:', err.message); res.status(400).json({ error: err.message }); }
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));   // 1mb to allow small profile-photo uploads
 
 // Open routes (no auth): health check + auth endpoints themselves
 app.get('/api/health', (req, res) => {

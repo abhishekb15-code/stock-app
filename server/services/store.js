@@ -74,6 +74,7 @@ const memBackend = {
         provider: profile.provider || null, passwordHash: profile.passwordHash || null,
         emailVerified: !!profile.emailVerified || isSeedUser(email),
         phone: profile.phone || null,
+        prefs: { dailyDigest: isSeedUser(email) },
         verifyToken: null, verifyExpires: 0, resetToken: null, resetExpires: 0,
         plan: isSeedUser(email) ? 'pro' : 'free', planStatus: isSeedUser(email) ? 'active' : null,
         billingProvider: null, subscriptionId: null, currentPeriodEnd: null,
@@ -122,11 +123,15 @@ const memBackend = {
   async findBySubscriptionId(subId) { for (const u of mem.users.values()) if (u.subscriptionId === subId) return u.email; return null; },
 
   async getProfile(email) { const u = await this.ensureUser(email);
-    return { email: u.email, name: u.name, phone: u.phone || null, picture: u.picture, provider: u.provider, emailVerified: !!u.emailVerified, createdAt: u.createdAt }; },
+    return { email: u.email, name: u.name, phone: u.phone || null, picture: u.picture, provider: u.provider, emailVerified: !!u.emailVerified, hasPassword: !!u.passwordHash, prefs: u.prefs || {}, createdAt: u.createdAt }; },
   async updateProfile(email, data) { const u = await this.ensureUser(email);
-    if (data.name  !== undefined) u.name  = data.name;
-    if (data.phone !== undefined) u.phone = data.phone;
+    if (data.name    !== undefined) u.name    = data.name;
+    if (data.phone   !== undefined) u.phone   = data.phone;
+    if (data.picture !== undefined) u.picture = data.picture;
     return this.getProfile(email); },
+  async setPassword(email, hash) { const u = await this.ensureUser(email); u.passwordHash = hash; return true; },
+  async updatePrefs(email, patch) { const u = await this.ensureUser(email); u.prefs = { ...(u.prefs || {}), ...patch }; return u.prefs; },
+  async getDigestRecipients() { return [...mem.users.values()].filter(u => u.prefs && u.prefs.dailyDigest).map(u => u.email); },
 
   async getHoldings(email)        { await this.ensureUser(email); return [...(mem.holdings.get(email) || [])]; },
   async addHolding(email, data)   { await this.ensureUser(email); const h = normHolding(data); mem.holdings.get(email).push(h); return h; },
@@ -199,7 +204,8 @@ const pgBackend = {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_provider TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end BIGINT;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs JSONB DEFAULT '{}'::jsonb;`);
     await this.ensureUser(LOCAL_USER, { name: 'Local' });
   },
   async ensureUser(email, profile = {}) {
@@ -208,7 +214,7 @@ const pgBackend = {
       await pool.query('INSERT INTO users(email,name,picture,provider,password_hash,seeded,email_verified) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [email, profile.name || null, profile.picture || null, profile.provider || null, profile.passwordHash || null, isSeedUser(email), isSeedUser(email) || !!profile.emailVerified]);
       if (isSeedUser(email)) {
-        await pool.query("UPDATE users SET plan='pro', plan_status='active' WHERE email=$1", [email]);
+        await pool.query(`UPDATE users SET plan='pro', plan_status='active', prefs='{"dailyDigest":true}'::jsonb WHERE email=$1`, [email]);
         for (const s of SEED_HOLDINGS) { const h = normHolding(s);
           await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
             [h.id, email, h.ticker, h.shares, h.avgBuyPrice, h.purchaseDate, h.notes]); }
@@ -255,14 +261,20 @@ const pgBackend = {
   async findBySubscriptionId(subId) { const { rows } = await pool.query('SELECT email FROM users WHERE subscription_id=$1', [subId]); return rows.length ? rows[0].email : null; },
 
   async getProfile(email) { await this.ensureUser(email);
-    const { rows } = await pool.query('SELECT email, name, phone, picture, provider, email_verified, created_at FROM users WHERE email=$1', [email]);
-    const u = rows[0] || {}; return { email: u.email, name: u.name, phone: u.phone || null, picture: u.picture, provider: u.provider, emailVerified: !!u.email_verified, createdAt: u.created_at }; },
+    const { rows } = await pool.query('SELECT email, name, phone, picture, provider, email_verified, password_hash, prefs, created_at FROM users WHERE email=$1', [email]);
+    const u = rows[0] || {}; return { email: u.email, name: u.name, phone: u.phone || null, picture: u.picture, provider: u.provider, emailVerified: !!u.email_verified, hasPassword: !!u.password_hash, prefs: u.prefs || {}, createdAt: u.created_at }; },
   async updateProfile(email, data) { await this.ensureUser(email);
     const sets = [], vals = [];
-    if (data.name  !== undefined) { sets.push(`name=$${sets.length + 2}`);  vals.push(data.name); }
-    if (data.phone !== undefined) { sets.push(`phone=$${sets.length + 2}`); vals.push(data.phone); }
+    if (data.name    !== undefined) { sets.push(`name=$${sets.length + 2}`);    vals.push(data.name); }
+    if (data.phone   !== undefined) { sets.push(`phone=$${sets.length + 2}`);   vals.push(data.phone); }
+    if (data.picture !== undefined) { sets.push(`picture=$${sets.length + 2}`); vals.push(data.picture); }
     if (sets.length) await pool.query(`UPDATE users SET ${sets.join(',')} WHERE email=$1`, [email, ...vals]);
     return this.getProfile(email); },
+  async setPassword(email, hash) { await this.ensureUser(email); await pool.query('UPDATE users SET password_hash=$1 WHERE email=$2', [hash, email]); return true; },
+  async updatePrefs(email, patch) { await this.ensureUser(email);
+    await pool.query('UPDATE users SET prefs = COALESCE(prefs, \'{}\'::jsonb) || $1::jsonb WHERE email=$2', [JSON.stringify(patch), email]);
+    return (await pool.query('SELECT prefs FROM users WHERE email=$1', [email])).rows[0].prefs; },
+  async getDigestRecipients() { const { rows } = await pool.query(`SELECT email FROM users WHERE (prefs->>'dailyDigest')::boolean IS TRUE`); return rows.map(r => r.email); },
 
   _mapH: (r) => ({ id: r.id, ticker: r.ticker, shares: Number(r.shares), avgBuyPrice: Number(r.avg_buy_price), purchaseDate: r.purchase_date, notes: r.notes, createdAt: r.created_at }),
   async getHoldings(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM holdings WHERE user_email=$1 ORDER BY created_at', [email]); return rows.map(this._mapH); },

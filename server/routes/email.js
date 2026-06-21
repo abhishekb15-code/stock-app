@@ -42,7 +42,7 @@ router.post('/trigger', async (req, res) => {
   try {
     console.log('📊 Running full portfolio analysis...');
     const { holdings, recommendations, whaleSignals } = await runFullAnalysis(auth.currentEmail(req));
-    const result = await sendDailyDigest({ holdings, recommendations, whaleSignals });
+    const result = await sendDailyDigest({ holdings, recommendations, whaleSignals, recipient: req.user && req.user.email });
     res.json({ success: true, ...result, holdingsAnalyzed: holdings.length, whaleSignals: whaleSignals.length });
   } catch (err) {
     console.error('Email trigger error:', err);

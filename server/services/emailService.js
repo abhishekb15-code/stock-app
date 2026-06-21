@@ -197,7 +197,7 @@ function buildEmailHTML({ holdings, recommendations, whaleSignals, aiAnalysis, d
 </body></html>`;
 }
 
-async function sendDailyDigest({ holdings, recommendations, whaleSignals, aiAnalysis }) {
+async function sendDailyDigest({ holdings, recommendations, whaleSignals, aiAnalysis, recipient }) {
   const date = new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'Asia/Kolkata' });
 
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
@@ -217,7 +217,7 @@ async function sendDailyDigest({ holdings, recommendations, whaleSignals, aiAnal
 
   const info = await transporter.sendMail({
     from: `"📈 Stock Intelligence" <${process.env.GMAIL_USER}>`,
-    to: process.env.EMAIL_RECIPIENT || process.env.GMAIL_USER,
+    to: recipient || process.env.EMAIL_RECIPIENT || process.env.GMAIL_USER,
     subject: `📈 Morning Digest — ${date}`,
     html,
   });
