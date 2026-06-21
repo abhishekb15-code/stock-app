@@ -9,6 +9,8 @@ import WhaleSignals from './pages/WhaleSignals';
 import Watchlist from './pages/Watchlist';
 import SuperInvestors from './pages/SuperInvestors';
 import Login from './pages/Login';
+import VerifyEmail from './pages/VerifyEmail';
+import ResetPassword from './pages/ResetPassword';
 
 axios.defaults.withCredentials = true;   // send the session cookie with API calls
 
@@ -21,6 +23,9 @@ export default function App() {
       .catch(() => setAuth({ authEnabled: false, authenticated: false }));   // fail open if the check itself errors
   }, []);
 
+  // Password-reset page is reachable without being signed in (link from email).
+  if (window.location.pathname === '/reset-password') return <ResetPassword />;
+
   if (!auth) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -30,6 +35,9 @@ export default function App() {
   }
 
   if (auth.authEnabled && !auth.authenticated) return <Login googleEnabled={auth.googleEnabled} />;
+
+  if (auth.authEnabled && auth.authenticated && auth.verificationRequired && !auth.verified)
+    return <VerifyEmail email={auth.user?.email} />;
 
   return (
     <BrowserRouter>

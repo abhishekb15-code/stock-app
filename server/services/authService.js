@@ -153,8 +153,23 @@ async function exchangeCode(req, code) {
 }
 
 function issueSession(res, user) {
-  const token = sign({ sub: user.sub, email: user.email, name: user.name, picture: user.picture });
+  const token = sign({ sub: user.sub, email: user.email, name: user.name, picture: user.picture, ver: !!user.verified });
   setCookie(res, COOKIE_NAME, token, SESSION_TTL);
+}
+
+const genToken = () => crypto.randomBytes(32).toString('hex');
+
+// Email verification is enforced only when auth is on AND SMTP is configured
+// (so we can actually send the verification email).
+function emailVerificationEnforced() {
+  return isConfigured() && require('./emailService').isEmailConfigured();
+}
+
+// Blocks data routes for signed-in-but-unverified users (when enforced).
+function requireVerified(req, res, next) {
+  if (!emailVerificationEnforced()) return next();
+  if (req.user && req.user.ver === false) return res.status(403).json({ error: 'Please verify your email to continue', code: 'unverified' });
+  next();
 }
 function clearSession(res) { setCookie(res, COOKIE_NAME, '', 0); }
 
@@ -181,4 +196,5 @@ module.exports = {
   cfg, isConfigured, googleConfigured, isAllowed, googleAuthUrl, exchangeCode, issueSession,
   clearSession, currentUser, requireAuth, parseCookies, COOKIE_NAME,
   hashPassword, verifyPassword, normalizeEmail, validEmail, currentEmail,
+  genToken, emailVerificationEnforced, requireVerified, baseUrl,
 };

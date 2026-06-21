@@ -72,19 +72,40 @@ const memBackend = {
     if (!mem.users.has(email)) {
       mem.users.set(email, { email, name: profile.name || null, picture: profile.picture || null,
         provider: profile.provider || null, passwordHash: profile.passwordHash || null,
+        emailVerified: !!profile.emailVerified || isSeedUser(email),
+        verifyToken: null, verifyExpires: 0, resetToken: null, resetExpires: 0,
         createdAt: new Date().toISOString() });
       mem.holdings.set(email, isSeedUser(email) ? SEED_HOLDINGS.map(normHolding) : []);
       mem.watch.set(email, []);
-    } else if (profile.name || profile.picture || profile.passwordHash) {
+    } else {
       const u = mem.users.get(email);
       if (profile.name) u.name = profile.name;
       if (profile.picture) u.picture = profile.picture;
       if (profile.passwordHash) u.passwordHash = profile.passwordHash;
       if (profile.provider) u.provider = profile.provider;
+      if (profile.emailVerified) u.emailVerified = true;
     }
     return mem.users.get(email);
   },
   async getUser(email)            { return mem.users.get(email) || null; },
+
+  async setVerifyToken(email, token, expires) { const u = await this.ensureUser(email); u.verifyToken = token; u.verifyExpires = expires; },
+  async markVerified(email)       { const u = await this.ensureUser(email); u.emailVerified = true; u.verifyToken = null; },
+  async consumeVerifyToken(token) {
+    for (const u of mem.users.values()) if (u.verifyToken === token) {
+      if (u.verifyExpires < Date.now()) return null;
+      u.emailVerified = true; u.verifyToken = null; return { email: u.email };
+    }
+    return null;
+  },
+  async setResetToken(email, token, expires) { const u = mem.users.get(email); if (!u) return false; u.resetToken = token; u.resetExpires = expires; return true; },
+  async consumeResetToken(token, passwordHash) {
+    for (const u of mem.users.values()) if (u.resetToken === token) {
+      if (u.resetExpires < Date.now()) return null;
+      u.passwordHash = passwordHash; u.resetToken = null; u.emailVerified = true; return { email: u.email };
+    }
+    return null;
+  },
 
   async getHoldings(email)        { await this.ensureUser(email); return [...(mem.holdings.get(email) || [])]; },
   async addHolding(email, data)   { await this.ensureUser(email); const h = normHolding(data); mem.holdings.get(email).push(h); return h; },
@@ -146,14 +167,19 @@ const pgBackend = {
       CREATE TABLE IF NOT EXISTS watchlist (
         id UUID PRIMARY KEY, user_email TEXT NOT NULL, ticker TEXT NOT NULL,
         note TEXT, target_price DOUBLE PRECISION, added_at TIMESTAMPTZ DEFAULT now());
-      CREATE INDEX IF NOT EXISTS watchlist_user ON watchlist(user_email);`);
+      CREATE INDEX IF NOT EXISTS watchlist_user ON watchlist(user_email);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_expires BIGINT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires BIGINT;`);
     await this.ensureUser(LOCAL_USER, { name: 'Local' });
   },
   async ensureUser(email, profile = {}) {
     const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
     if (!rows.length) {
-      await pool.query('INSERT INTO users(email,name,picture,provider,password_hash,seeded) VALUES($1,$2,$3,$4,$5,$6)',
-        [email, profile.name || null, profile.picture || null, profile.provider || null, profile.passwordHash || null, isSeedUser(email)]);
+      await pool.query('INSERT INTO users(email,name,picture,provider,password_hash,seeded,email_verified) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        [email, profile.name || null, profile.picture || null, profile.provider || null, profile.passwordHash || null, isSeedUser(email), isSeedUser(email) || !!profile.emailVerified]);
       if (isSeedUser(email)) {
         for (const s of SEED_HOLDINGS) { const h = normHolding(s);
           await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
@@ -166,11 +192,28 @@ const pgBackend = {
     if (profile.picture)                 { sets.push(`picture=$${sets.length + 2}`); vals.push(profile.picture); }
     if (profile.passwordHash)            { sets.push(`password_hash=$${sets.length + 2}`); vals.push(profile.passwordHash); }
     if (profile.provider && !u.provider) { sets.push(`provider=$${sets.length + 2}`); vals.push(profile.provider); }
+    if (profile.emailVerified)           { sets.push(`email_verified=TRUE`); }
     if (sets.length) await pool.query(`UPDATE users SET ${sets.join(',')} WHERE email=$1`, [email, ...vals]);
     return u;
   },
   async getUser(email) { const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]); if (!rows.length) return null;
-    const u = rows[0]; return { email: u.email, name: u.name, picture: u.picture, provider: u.provider, passwordHash: u.password_hash, createdAt: u.created_at }; },
+    const u = rows[0]; return { email: u.email, name: u.name, picture: u.picture, provider: u.provider, passwordHash: u.password_hash, emailVerified: u.email_verified, createdAt: u.created_at }; },
+
+  async setVerifyToken(email, token, expires) { await this.ensureUser(email); await pool.query('UPDATE users SET verify_token=$1, verify_expires=$2 WHERE email=$3', [token, expires, email]); },
+  async markVerified(email) { await this.ensureUser(email); await pool.query('UPDATE users SET email_verified=TRUE, verify_token=NULL WHERE email=$1', [email]); },
+  async consumeVerifyToken(token) {
+    const { rows } = await pool.query('SELECT email, verify_expires FROM users WHERE verify_token=$1', [token]);
+    if (!rows.length || Number(rows[0].verify_expires) < Date.now()) return null;
+    await pool.query('UPDATE users SET email_verified=TRUE, verify_token=NULL WHERE email=$1', [rows[0].email]);
+    return { email: rows[0].email };
+  },
+  async setResetToken(email, token, expires) { const { rowCount } = await pool.query('UPDATE users SET reset_token=$1, reset_expires=$2 WHERE email=$3', [token, expires, email]); return rowCount > 0; },
+  async consumeResetToken(token, passwordHash) {
+    const { rows } = await pool.query('SELECT email, reset_expires FROM users WHERE reset_token=$1', [token]);
+    if (!rows.length || Number(rows[0].reset_expires) < Date.now()) return null;
+    await pool.query('UPDATE users SET password_hash=$1, reset_token=NULL, email_verified=TRUE WHERE email=$2', [passwordHash, rows[0].email]);
+    return { email: rows[0].email };
+  },
 
   _mapH: (r) => ({ id: r.id, ticker: r.ticker, shares: Number(r.shares), avgBuyPrice: Number(r.avg_buy_price), purchaseDate: r.purchase_date, notes: r.notes, createdAt: r.created_at }),
   async getHoldings(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM holdings WHERE user_email=$1 ORDER BY created_at', [email]); return rows.map(this._mapH); },

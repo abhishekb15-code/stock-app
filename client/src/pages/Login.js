@@ -14,17 +14,24 @@ export default function Login({ googleEnabled }) {
   const errKey = params.get('auth_error');
   const oauthErr = errKey && (ERRORS[errKey] ? ERRORS[errKey](params.get('email')) : 'Sign-in error — please try again.');
 
-  const [mode, setMode]   = useState('login');   // 'login' | 'register'
+  const [mode, setMode]   = useState('login');   // 'login' | 'register' | 'forgot'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName]   = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo]   = useState('');
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
-    setError(''); setLoading(true);
+    setError(''); setInfo(''); setLoading(true);
     try {
+      if (mode === 'forgot') {
+        await axios.post('/api/auth/forgot-password', { email });
+        setInfo('If an account exists for that email, a password-reset link is on its way.');
+        setLoading(false);
+        return;
+      }
       const url = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
       await axios.post(url, { email, password, name });
       window.location.href = '/';   // reload → App re-checks /api/auth/me → app
@@ -60,6 +67,11 @@ export default function Login({ googleEnabled }) {
             {error || oauthErr}
           </div>
         )}
+        {info && (
+          <div style={{ background: '#052e16', border: '1px solid #166534', color: '#4ade80', borderRadius: 8, padding: '10px 14px', fontSize: 12, marginBottom: 16 }}>
+            {info}
+          </div>
+        )}
 
         <form onSubmit={submit}>
           {mode === 'register' && (
@@ -68,12 +80,25 @@ export default function Login({ googleEnabled }) {
           )}
           <input className="input" type="email" placeholder="Email (any provider)" value={email} onChange={e => setEmail(e.target.value)} required
             style={{ width: '100%', boxSizing: 'border-box', marginBottom: 10 }} />
-          <input className="input" type="password" placeholder={mode === 'register' ? 'Password (min 8 characters)' : 'Password'} value={password} onChange={e => setPassword(e.target.value)} required
-            style={{ width: '100%', boxSizing: 'border-box', marginBottom: 16 }} />
-          <button className="btn btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-            {loading ? 'Please wait…' : mode === 'register' ? 'Create account' : 'Sign in'}
+          {mode !== 'forgot' && (
+            <input className="input" type="password" placeholder={mode === 'register' ? 'Password (min 8 characters)' : 'Password'} value={password} onChange={e => setPassword(e.target.value)} required
+              style={{ width: '100%', boxSizing: 'border-box', marginBottom: 16 }} />
+          )}
+          <button className="btn btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center', marginTop: mode === 'forgot' ? 6 : 0 }}>
+            {loading ? 'Please wait…' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Sign in'}
           </button>
         </form>
+
+        <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12 }}>
+          {mode === 'login' && (
+            <button onClick={() => { setMode('forgot'); setError(''); setInfo(''); }}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>Forgot password?</button>
+          )}
+          {mode === 'forgot' && (
+            <button onClick={() => { setMode('login'); setError(''); setInfo(''); }}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>← Back to sign in</button>
+          )}
+        </div>
 
         {googleEnabled && (
           <>

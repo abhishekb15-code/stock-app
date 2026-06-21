@@ -57,7 +57,8 @@ if (auth.isConfigured()) {
 } else {
   console.warn('⚠️  Auth DISABLED — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, JWT_SECRET, ALLOWED_EMAILS to lock the app down.');
 }
-app.use('/api', auth.requireAuth);   // protects every /api/* route mounted below
+app.use('/api', auth.requireAuth);       // must be signed in
+app.use('/api', auth.requireVerified);   // …and email-verified (when enforced)
 
 // API Routes
 app.use('/api/stock', stockRoutes);

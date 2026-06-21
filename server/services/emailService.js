@@ -225,4 +225,53 @@ async function sendDailyDigest({ holdings, recommendations, whaleSignals, aiAnal
   return { success:true, mode:'email', messageId:info.messageId };
 }
 
-module.exports = { sendDailyDigest, buildEmailHTML };
+// ── Transactional email (verification, password reset) ────────────────────────
+function isEmailConfigured() {
+  return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
+}
+
+async function sendMail({ to, subject, html }) {
+  const logConsole = () => {
+    const link = (html.match(/href="([^"]+)"/) || [])[1];
+    console.log(`\n📧 EMAIL (console) → ${to}\n   ${subject}${link ? `\n   Link: ${link}` : ''}`);
+    return { success: true, mode: 'console' };
+  };
+  if (!isEmailConfigured()) return logConsole();
+  try {
+    const info = await createTransporter().sendMail({
+      from: `"Stock Intel" <${process.env.GMAIL_USER}>`, to, subject, html,
+    });
+    return { success: true, mode: 'email', messageId: info.messageId };
+  } catch (err) {
+    console.warn(`⚠️  Email send failed (${err.message}) — falling back to console`);
+    return logConsole();   // never let a transient SMTP error break signup/reset
+  }
+}
+
+function actionEmail({ heading, body, buttonText, link, footnote }) {
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#070d14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:480px;margin:0 auto;padding:32px 16px;">
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:14px;padding:36px 32px;text-align:center;">
+      <div style="font-size:11px;letter-spacing:4px;color:#3b82f6;text-transform:uppercase;font-weight:700;margin-bottom:18px;">Stock Intel</div>
+      <div style="font-size:22px;font-weight:800;color:#f1f5f9;margin-bottom:14px;">${heading}</div>
+      <div style="font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:28px;">${body}</div>
+      <a href="${link}" style="display:inline-block;background:#3b82f6;color:#fff;font-weight:700;font-size:14px;text-decoration:none;padding:12px 28px;border-radius:8px;">${buttonText}</a>
+      <div style="font-size:12px;color:#475569;margin-top:28px;line-height:1.6;">${footnote}</div>
+      <div style="font-size:11px;color:#334155;margin-top:18px;word-break:break-all;">Or paste this link: ${link}</div>
+    </div>
+  </div></body></html>`;
+}
+
+function sendVerificationEmail(to, link) {
+  return sendMail({ to, subject: 'Verify your Stock Intel email',
+    html: actionEmail({ heading: 'Confirm your email', body: 'Tap the button below to verify your email address and activate your account.',
+      buttonText: 'Verify email', link, footnote: 'This link expires in 24 hours. If you didn’t create an account, you can ignore this email.' }) });
+}
+
+function sendPasswordResetEmail(to, link) {
+  return sendMail({ to, subject: 'Reset your Stock Intel password',
+    html: actionEmail({ heading: 'Reset your password', body: 'We received a request to reset your password. Tap below to choose a new one.',
+      buttonText: 'Reset password', link, footnote: 'This link expires in 1 hour. If you didn’t request this, you can safely ignore it.' }) });
+}
+
+module.exports = { sendDailyDigest, buildEmailHTML, sendMail, isEmailConfigured, sendVerificationEmail, sendPasswordResetEmail };
