@@ -62,7 +62,7 @@ const USE_PG = !!process.env.DATABASE_URL;
 // ─────────────────────────────────────────────────────────────────────────────
 // In-memory backend
 // ─────────────────────────────────────────────────────────────────────────────
-const mem = { users: new Map(), holdings: new Map(), watch: new Map() };  // email -> …
+const mem = { users: new Map(), holdings: new Map(), watch: new Map(), txns: new Map() };  // email -> …
 
 const memBackend = {
   async init() {
@@ -133,6 +133,9 @@ const memBackend = {
   async updatePrefs(email, patch) { const u = await this.ensureUser(email); u.prefs = { ...(u.prefs || {}), ...patch }; return u.prefs; },
   async getDigestRecipients() { return [...mem.users.values()].filter(u => u.prefs && u.prefs.dailyDigest).map(u => u.email); },
 
+  async addTransaction(email, tx) { const arr = mem.txns.get(email) || []; const rec = { id: crypto.randomUUID(), ...tx, createdAt: new Date().toISOString() }; arr.unshift(rec); mem.txns.set(email, arr); return rec; },
+  async getTransactions(email, ticker) { const arr = mem.txns.get(email) || []; return (ticker ? arr.filter(t => t.ticker === ticker) : arr).slice(0, 50); },
+
   async getHoldings(email)        { await this.ensureUser(email); return [...(mem.holdings.get(email) || [])]; },
   async addHolding(email, data)   { await this.ensureUser(email); const h = normHolding(data); mem.holdings.get(email).push(h); return h; },
   async updateHolding(email, id, data) {
@@ -194,6 +197,11 @@ const pgBackend = {
         id UUID PRIMARY KEY, user_email TEXT NOT NULL, ticker TEXT NOT NULL,
         note TEXT, target_price DOUBLE PRECISION, added_at TIMESTAMPTZ DEFAULT now());
       CREATE INDEX IF NOT EXISTS watchlist_user ON watchlist(user_email);
+      CREATE TABLE IF NOT EXISTS transactions (
+        id UUID PRIMARY KEY, user_email TEXT NOT NULL, holding_id TEXT, ticker TEXT NOT NULL,
+        type TEXT NOT NULL, shares DOUBLE PRECISION, price DOUBLE PRECISION,
+        realized DOUBLE PRECISION, tx_date TEXT, created_at TIMESTAMPTZ DEFAULT now());
+      CREATE INDEX IF NOT EXISTS tx_user ON transactions(user_email, ticker);
       ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_expires BIGINT;
@@ -275,6 +283,14 @@ const pgBackend = {
     await pool.query('UPDATE users SET prefs = COALESCE(prefs, \'{}\'::jsonb) || $1::jsonb WHERE email=$2', [JSON.stringify(patch), email]);
     return (await pool.query('SELECT prefs FROM users WHERE email=$1', [email])).rows[0].prefs; },
   async getDigestRecipients() { const { rows } = await pool.query(`SELECT email FROM users WHERE (prefs->>'dailyDigest')::boolean IS TRUE`); return rows.map(r => r.email); },
+
+  async addTransaction(email, tx) { const id = crypto.randomUUID();
+    await pool.query('INSERT INTO transactions(id,user_email,holding_id,ticker,type,shares,price,realized,tx_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [id, email, tx.holdingId || null, tx.ticker, tx.type, tx.shares, tx.price, tx.realized ?? null, tx.date || null]);
+    return { id, ...tx, createdAt: new Date().toISOString() }; },
+  async getTransactions(email, ticker) {
+    const { rows } = await pool.query('SELECT * FROM transactions WHERE user_email=$1 AND ($2::text IS NULL OR ticker=$2) ORDER BY created_at DESC LIMIT 50', [email, ticker || null]);
+    return rows.map(r => ({ id: r.id, holdingId: r.holding_id, ticker: r.ticker, type: r.type, shares: Number(r.shares), price: Number(r.price), realized: r.realized != null ? Number(r.realized) : null, date: r.tx_date, createdAt: r.created_at })); },
 
   _mapH: (r) => ({ id: r.id, ticker: r.ticker, shares: Number(r.shares), avgBuyPrice: Number(r.avg_buy_price), purchaseDate: r.purchase_date, notes: r.notes, createdAt: r.created_at }),
   async getHoldings(email) { await this.ensureUser(email); const { rows } = await pool.query('SELECT * FROM holdings WHERE user_email=$1 ORDER BY created_at', [email]); return rows.map(this._mapH); },
