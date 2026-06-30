@@ -57,13 +57,14 @@ router.post('/register', limiter, async (req, res) => {
     const existing = await store.getUser(email);
     if (existing && existing.passwordHash) return res.status(409).json({ error: 'An account with this email already exists — please sign in' });
 
-    // If we can't send email, auto-verify (can't gate on something we can't deliver).
-    const verified = !isEmailConfigured();
-    await store.ensureUser(email, { name, provider: 'password', passwordHash: auth.hashPassword(password), emailVerified: verified });
-    if (!verified) await emailVerification(req, email);
+    // Only require verification when it's actually enforced (opt-in + a working
+    // email provider); otherwise auto-verify so signup works.
+    const enforced = auth.emailVerificationEnforced();
+    await store.ensureUser(email, { name, provider: 'password', passwordHash: auth.hashPassword(password), emailVerified: !enforced });
+    if (enforced) await emailVerification(req, email);
 
-    auth.issueSession(res, { email, name, verified });
-    res.status(201).json({ user: { email, name }, needsVerification: !verified });
+    auth.issueSession(res, { email, name, verified: !enforced });
+    res.status(201).json({ user: { email, name }, needsVerification: enforced });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

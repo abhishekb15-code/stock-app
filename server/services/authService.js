@@ -28,6 +28,9 @@ const cfg = {
   // Signup is OPEN by default (any email). Set RESTRICT_SIGNUP=1 to limit signups
   // to the ALLOWED_EMAILS list (invite-only mode).
   restrict:     /^(1|true|yes)$/i.test(process.env.RESTRICT_SIGNUP || ''),
+  // Email verification is OPT-IN: set REQUIRE_EMAIL_VERIFICATION=1 (and a working
+  // email provider) to require new users to confirm their email before using the app.
+  requireVerification: /^(1|true|yes)$/i.test(process.env.REQUIRE_EMAIL_VERIFICATION || ''),
   baseUrl:      process.env.APP_BASE_URL || '',
   isProd:       process.env.NODE_ENV === 'production' || !!process.env.RENDER,
 };
@@ -166,7 +169,7 @@ const genToken = () => crypto.randomBytes(32).toString('hex');
 // Email verification is enforced only when auth is on AND SMTP is configured
 // (so we can actually send the verification email).
 function emailVerificationEnforced() {
-  return isConfigured() && require('./emailService').isEmailConfigured();
+  return isConfigured() && cfg.requireVerification && require('./emailService').isEmailConfigured();
 }
 
 // Blocks data routes for signed-in-but-unverified users (when enforced).

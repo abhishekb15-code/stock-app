@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const https      = require('https');
 
 const money       = (v) => `₹${Number(v||0).toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}`;
 const signedMoney = (v) => `${v>=0?'+':'-'}${money(Math.abs(v))}`;
@@ -202,34 +203,42 @@ function buildEmailHTML({ holdings, recommendations, whaleSignals, aiAnalysis, d
 async function sendDailyDigest({ holdings, recommendations, whaleSignals, aiAnalysis, recipient }) {
   const date = new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'Asia/Kolkata' });
 
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+  if (!isEmailConfigured()) {
     const totalValue = holdings.reduce((s,h)=>s+h.totalValue,0);
     const totalPnl   = holdings.reduce((s,h)=>s+h.pnl,0);
-    console.log('\n📧 DIGEST (no SMTP — printing to console):');
+    console.log('\n📧 DIGEST (no email provider — printing to console):');
     console.log(`   Date: ${date} | Value: ${money(totalValue)} | P&L: ${signedMoney(totalPnl)}`);
-    holdings.forEach(h => {
-      const rec = recommendations.find(r=>r.ticker===h.ticker);
-      console.log(`   ${(h.displayTicker||h.ticker).padEnd(14)} ${money(h.currentPrice).padEnd(16)} ${signedMoney(h.pnl).padEnd(16)} ${rec?.recommendation?.toUpperCase()||'N/A'}`);
-    });
     return { success:true, mode:'console' };
   }
 
-  const transporter = createTransporter();
   const html = buildEmailHTML({ holdings, recommendations, whaleSignals, aiAnalysis, date });
-
-  const info = await transporter.sendMail({
-    from: `"📈 Stock Intelligence" <${process.env.GMAIL_USER}>`,
-    to: recipient || process.env.EMAIL_RECIPIENT || process.env.GMAIL_USER,
-    subject: `📈 Morning Digest — ${date}`,
-    html,
-  });
-
-  return { success:true, mode:'email', messageId:info.messageId };
+  const to = recipient || process.env.EMAIL_RECIPIENT || process.env.GMAIL_USER;
+  return sendMail({ to, subject: `📈 Morning Digest — ${date}`, html });
 }
 
 // ── Transactional email (verification, password reset) ────────────────────────
-function isEmailConfigured() {
-  return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
+// Prefer Resend (HTTPS — works on hosts that block SMTP, e.g. Render free tier);
+// fall back to Gmail SMTP; finally log to console so nothing ever breaks.
+const hasResend = () => !!process.env.RESEND_API_KEY;
+const hasGmail  = () => !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
+function isEmailConfigured() { return hasResend() || hasGmail(); }
+
+const FROM = () => process.env.EMAIL_FROM || (hasResend() ? 'Stock Intel <onboarding@resend.dev>' : `Stock Intel <${process.env.GMAIL_USER}>`);
+
+function sendViaResend({ to, subject, html }) {
+  const body = JSON.stringify({ from: FROM(), to: [to], subject, html });
+  return new Promise((resolve, reject) => {
+    const req = https.request({ method: 'POST', host: 'api.resend.com', path: '/emails',
+      headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 15000,
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) resolve({ success: true, mode: 'resend', id: (JSON.parse(d || '{}')).id });
+      else reject(new Error(`Resend HTTP ${res.statusCode}: ${d.slice(0, 160)}`));
+    }); });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Resend timeout')); });
+    req.write(body); req.end();
+  });
 }
 
 async function sendMail({ to, subject, html }) {
@@ -238,16 +247,19 @@ async function sendMail({ to, subject, html }) {
     console.log(`\n📧 EMAIL (console) → ${to}\n   ${subject}${link ? `\n   Link: ${link}` : ''}`);
     return { success: true, mode: 'console' };
   };
-  if (!isEmailConfigured()) return logConsole();
-  try {
-    const info = await createTransporter().sendMail({
-      from: `"Stock Intel" <${process.env.GMAIL_USER}>`, to, subject, html,
-    });
-    return { success: true, mode: 'email', messageId: info.messageId };
-  } catch (err) {
-    console.warn(`⚠️  Email send failed (${err.message}) — falling back to console`);
-    return logConsole();   // never let a transient SMTP error break signup/reset
+  if (hasResend()) {
+    try { return await sendViaResend({ to, subject, html }); }
+    catch (err) { console.warn(`⚠️  Resend failed (${err.message}) — falling back`); }
   }
+  if (hasGmail()) {
+    try {
+      const info = await createTransporter().sendMail({ from: FROM(), to, subject, html });
+      return { success: true, mode: 'email', messageId: info.messageId };
+    } catch (err) {
+      console.warn(`⚠️  SMTP send failed (${err.message}) — falling back to console`);
+    }
+  }
+  return logConsole();   // never let an email failure break signup/reset
 }
 
 function actionEmail({ heading, body, buttonText, link, footnote }) {
