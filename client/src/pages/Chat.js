@@ -36,6 +36,7 @@ export default function Chat() {
   const [available, setAvailable] = useState(null); // null=checking, true/false
   const [error, setError] = useState('');
   const [showSlash, setShowSlash] = useState(false);
+  const [remaining, setRemaining] = useState(null);  // turns left today (null = unlimited)
 
   const scrollRef = useRef(null);
   const taRef = useRef(null);
@@ -44,7 +45,7 @@ export default function Chat() {
   useEffect(() => {
     fetch('/api/chat/status', { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(d => setAvailable(!!d.available))
+      .then(d => { setAvailable(!!d.available); setRemaining(d.remaining ?? null); })
       .catch(s => setAvailable(s === 402 ? 'locked' : false));
   }, []);
 
@@ -94,6 +95,7 @@ export default function Chat() {
         if (resp.status === 402) { setAvailable('locked'); throw new Error('The AI assistant is a Pro feature.'); }
         if (resp.status === 503) { setAvailable(false); throw new Error('The AI assistant is not configured on the server.'); }
         const j = await resp.json().catch(() => ({}));
+        if (resp.status === 429) { setRemaining(0); throw new Error(j.error || 'Daily message limit reached.'); }
         throw new Error(j.error || `Request failed (${resp.status})`);
       }
 
@@ -119,7 +121,7 @@ export default function Chat() {
           else if (evt === 'thinking') { acc.thinking += payload.text; setDraft(d => ({ ...d, thinking: acc.thinking })); }
           else if (evt === 'tool') { setDraft(d => ({ ...d, tool: payload.name })); }
           else if (evt === 'error') { throw new Error(payload.error || 'Assistant error'); }
-          else if (evt === 'done') { /* finalize below */ }
+          else if (evt === 'done') { if (payload.remaining !== undefined) setRemaining(payload.remaining); }
         }
       }
 
@@ -265,6 +267,7 @@ export default function Chat() {
           </div>
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 7 }}>
             AI analysis for education — not personalised investment advice. Verify before trading.
+            {remaining !== null && <> · <span style={{ color: remaining <= 3 ? 'var(--red)' : 'var(--text-muted)' }}>{remaining} message{remaining === 1 ? '' : 's'} left today</span></>}
           </div>
         </div>
       )}
