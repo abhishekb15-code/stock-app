@@ -14,8 +14,10 @@ const RESET_TTL  = 60 * 60 * 1000;        // 1h
 
 async function emailVerification(req, email) {
   const token = auth.genToken();
-  await store.setVerifyToken(email, token, Date.now() + VERIFY_TTL);
-  await sendVerificationEmail(email, `${auth.baseUrl(req)}/api/auth/verify?token=${token}`);
+  await store.setVerifyToken(email, token, Date.now() + VERIFY_TTL);   // persist the token (fast)
+  // Send the email in the background — never block the response on SMTP.
+  sendVerificationEmail(email, `${auth.baseUrl(req)}/api/auth/verify?token=${token}`)
+    .catch(e => console.warn('Verification email failed:', e.message));
 }
 
 // GET /api/auth/me — session + available methods + verification state
@@ -110,7 +112,8 @@ router.post('/forgot-password', limiter, async (req, res) => {
     if (user && user.passwordHash && isEmailConfigured()) {
       const token = auth.genToken();
       await store.setResetToken(email, token, Date.now() + RESET_TTL);
-      await sendPasswordResetEmail(email, `${auth.baseUrl(req)}/reset-password?token=${token}`);
+      sendPasswordResetEmail(email, `${auth.baseUrl(req)}/reset-password?token=${token}`)
+        .catch(e => console.warn('Reset email failed:', e.message));
     }
     // Always generic — never reveal whether an email exists.
     res.json({ success: true });

@@ -8,6 +8,8 @@ function createTransporter() {
   return nodemailer.createTransport({
     service: 'gmail',
     auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    // Fail fast if the SMTP port is blocked (e.g. some PaaS free tiers) instead of hanging.
+    connectionTimeout: 10000, greetingTimeout: 8000, socketTimeout: 15000,
   });
 }
 
