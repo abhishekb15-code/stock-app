@@ -84,6 +84,7 @@ app.use('/api/watchlist', require('./routes/watchlist'));
 
 // Pro-only API routes (gated when billing is enabled)
 app.use('/api/analysis', billing.requirePro, analysisRoutes);
+app.use('/api/chat', billing.requirePro, require('./routes/chat'));
 app.use('/api/signals', billing.requirePro, require('./routes/signals'));
 app.use('/api/superinvestors', billing.requirePro, require('./routes/superinvestors'));
 app.use('/api/indian-investors', billing.requirePro, require('./routes/indianInvestors'));

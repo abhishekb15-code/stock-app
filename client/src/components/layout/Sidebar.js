@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown, LogOut, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Briefcase, TrendingUp, Fish, Search, Mail, Activity, Star, Crown, LogOut, Sparkles, MessageSquare } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../../AuthContext';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/chat', icon: MessageSquare, label: 'AI Analyst' },
   { to: '/portfolio', icon: Briefcase, label: 'Portfolio' },
   { to: '/watchlist', icon: Star, label: 'Watchlist' },
   { to: '/whales', icon: Fish, label: 'Whale Signals' },

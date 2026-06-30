@@ -13,6 +13,7 @@ import VerifyEmail from './pages/VerifyEmail';
 import ResetPassword from './pages/ResetPassword';
 import Pricing from './pages/Pricing';
 import Profile from './pages/Profile';
+import Chat from './pages/Chat';
 import { AuthContext } from './AuthContext';
 
 axios.defaults.withCredentials = true;   // send the session cookie with API calls
@@ -50,6 +51,7 @@ export default function App() {
           <main style={{ flex: 1, marginLeft: 220, padding: '28px 32px', maxWidth: 'calc(100vw - 220px)' }}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/chat" element={<Chat />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/stock/:ticker" element={<StockDeepDive />} />
               <Route path="/watchlist" element={<Watchlist />} />
