@@ -25,6 +25,9 @@ const cfg = {
   clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
   jwtSecret:    process.env.JWT_SECRET || '',
   allowed:      (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean),
+  // Signup is OPEN by default (any email). Set RESTRICT_SIGNUP=1 to limit signups
+  // to the ALLOWED_EMAILS list (invite-only mode).
+  restrict:     /^(1|true|yes)$/i.test(process.env.RESTRICT_SIGNUP || ''),
   baseUrl:      process.env.APP_BASE_URL || '',
   isProd:       process.env.NODE_ENV === 'production' || !!process.env.RENDER,
 };
@@ -38,10 +41,11 @@ function googleConfigured() {
   return !!(cfg.clientId && cfg.clientSecret && cfg.jwtSecret);
 }
 
-// Open signup (any email) when no allowlist is set or it contains "*".
-// Otherwise restrict to the allow-listed emails.
+// Open signup by default — any email may register. Only when RESTRICT_SIGNUP is
+// set do we limit signups to the ALLOWED_EMAILS list (and "*" still means open).
 function isAllowed(email) {
   if (!email) return false;
+  if (!cfg.restrict) return true;
   if (!cfg.allowed.length || cfg.allowed.includes('*')) return true;
   return cfg.allowed.includes(email.toLowerCase());
 }

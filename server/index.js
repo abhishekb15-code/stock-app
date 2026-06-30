@@ -63,7 +63,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', require('./routes/auth'));
 
 if (auth.isConfigured()) {
-  console.log(`🔒 Auth ENABLED — Google Sign-In, ${auth.cfg.allowed.includes('*') ? 'any verified Google account' : auth.cfg.allowed.length + ' allowed email(s)'}`);
+  console.log(`🔒 Auth ENABLED — ${auth.cfg.restrict ? `invite-only (${auth.cfg.allowed.length} allowed email(s))` : 'open signup (any email)'}`);
 } else {
   console.warn('⚠️  Auth DISABLED — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, JWT_SECRET, ALLOWED_EMAILS to lock the app down.');
 }
