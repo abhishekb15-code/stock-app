@@ -81,6 +81,7 @@ app.use('/api/whales', whaleRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/watchlist', require('./routes/watchlist'));
+app.use('/api/premarket', require('./routes/premarket'));
 
 // Pro-only API routes (gated when billing is enabled)
 app.use('/api/analysis', billing.requirePro, analysisRoutes);
@@ -125,4 +126,8 @@ app.listen(PORT, () => {
   }
   store.init().catch(e => console.error('Store init failed:', e.message));
   initScheduler();
+  // Pre-warm the pre-market snapshot so the first Dashboard load is instant.
+  require('./services/preMarketService').getPreMarketInsight('local@local')
+    .then(() => console.log('🌅 Pre-market snapshot warmed'))
+    .catch(e => console.warn('Pre-market warm-up failed:', e.message));
 });

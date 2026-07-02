@@ -5,6 +5,7 @@ import { TrendingUp, TrendingDown, DollarSign, PieChart, RefreshCw, AlertCircle,
 import { PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useLocked } from '../AuthContext';
 import UpgradeNotice from '../components/UpgradeNotice';
+import PreMarketPanel from '../components/PreMarketPanel';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7'];
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -81,6 +82,9 @@ export default function Dashboard() {
           <RefreshCw size={13} /> Refresh
         </button>
       </div>
+
+      {/* Pre-market / market direction insight */}
+      <PreMarketPanel />
 
       {/* Summary metrics */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
