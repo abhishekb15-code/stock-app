@@ -12,7 +12,34 @@ function normalizeSymbol(input) {
   const symbol = input.trim().toUpperCase().replace(/\s+/g, '');
   if (!symbol) throw new Error('A stock symbol is required');
   if (symbol.startsWith('^') || symbol.endsWith('.NS') || symbol.endsWith('.BO')) return symbol;
+  // Pure-numeric input is a BSE scrip code (e.g. 504132) → BSE, not NSE.
+  if (/^\d+$/.test(symbol)) return `${symbol}.BO`;
   return `${symbol}${DEFAULT_EXCHANGE_SUFFIX}`;
+}
+
+// Resolve a user-typed symbol to the exchange that actually has a live quote.
+// - explicit suffix (.NS/.BO) or index (^) → used as-is
+// - numeric BSE scrip code → BSE
+// - plain symbol → try NSE first, then BSE
+// Returns the working Yahoo symbol, or throws if neither exchange has it.
+async function resolveSymbol(input) {
+  if (!input || typeof input !== 'string') throw new Error('A stock symbol is required');
+  const raw = input.trim().toUpperCase().replace(/\s+/g, '');
+  if (!raw) throw new Error('A stock symbol is required');
+
+  let candidates;
+  if (raw.startsWith('^') || raw.endsWith('.NS') || raw.endsWith('.BO')) candidates = [raw];
+  else if (/^\d+$/.test(raw)) candidates = [`${raw}.BO`, `${raw}.NS`];   // numeric → BSE first
+  else candidates = [`${raw}${DEFAULT_EXCHANGE_SUFFIX}`, `${raw}.BO`];   // plain → NSE, then BSE
+
+  let lastErr;
+  for (const sym of candidates) {
+    try {
+      const q = await mds.getQuote(sym);
+      if (q && Number.isFinite(q.price) && q.price > 0) return sym;
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error(`No quote found for ${raw} on NSE or BSE`);
 }
 
 function displaySymbol(symbol) {
@@ -336,7 +363,7 @@ function generateRecommendation(ticker, technical, fundamentals) {
 }
 
 module.exports = {
-  normalizeSymbol, displaySymbol, round, compactCurrency,
+  normalizeSymbol, resolveSymbol, displaySymbol, round, compactCurrency,
   getQuote, getAssetProfile, getStockAnalysis, getFundamentals,
   getDevelopments, getPortfolioHoldings, getWhaleSignals, generateRecommendation,
 };

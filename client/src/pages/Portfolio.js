@@ -66,8 +66,8 @@ function HoldingModal({ onClose, onSave, holding }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ gridColumn: '1/-1' }}>
-            <label className="label">NSE Symbol *</label>
-            <input className="input" placeholder="e.g. RELIANCE" value={form.ticker} onChange={set('ticker')} readOnly={isEdit}
+            <label className="label">Symbol (NSE or BSE) *</label>
+            <input className="input" placeholder="e.g. RELIANCE, RELIANCE.BO, 504132" value={form.ticker} onChange={set('ticker')} readOnly={isEdit}
               style={{ width: '100%', boxSizing: 'border-box', textTransform: 'uppercase', opacity: isEdit ? 0.6 : 1, cursor: isEdit ? 'not-allowed' : 'text' }} />
           </div>
           <div>

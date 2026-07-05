@@ -73,8 +73,8 @@ export default function Watchlist() {
       {/* Add form */}
       <form onSubmit={add} className="card" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', padding: 16, marginBottom: 20 }}>
         <div style={{ flex: '1 1 160px' }}>
-          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Ticker (NSE)</label>
-          <input className="input" placeholder="e.g. DMART, TATAPOWER" value={ticker} onChange={e => setTicker(e.target.value)} />
+          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Ticker (NSE or BSE)</label>
+          <input className="input" placeholder="e.g. DMART, RELIANCE.BO, 504132" value={ticker} onChange={e => setTicker(e.target.value)} />
         </div>
         <div style={{ flex: '0 1 130px' }}>
           <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Target price (₹)</label>

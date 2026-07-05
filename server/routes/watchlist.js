@@ -4,7 +4,7 @@ const store   = require('../services/store');
 const auth    = require('../services/authService');
 const mds     = require('../services/marketDataService');
 const { getVolumeSignal, mapLimit } = require('../services/volumeService');
-const { normalizeSymbol, displaySymbol, round } = require('../services/indianMarketData');
+const { normalizeSymbol, resolveSymbol, displaySymbol, round } = require('../services/indianMarketData');
 
 // Enrich a watchlist item with live price, daily change and a volume signal.
 async function enrich(item) {
@@ -48,10 +48,10 @@ router.post('/', async (req, res) => {
   try {
     const { ticker, note, targetPrice } = req.body;
     if (!ticker) return res.status(400).json({ error: 'ticker is required' });
-    // Validate the ticker resolves to a real quote before adding
-    const sym = normalizeSymbol(ticker);
-    try { await mds.getQuote(sym); }
-    catch { return res.status(404).json({ error: `Could not find a quote for ${displaySymbol(sym)}` }); }
+    // Resolve to whichever exchange (NSE or BSE) actually has a live quote.
+    let sym;
+    try { sym = await resolveSymbol(ticker); }
+    catch { return res.status(404).json({ error: `Could not find ${ticker.toUpperCase()} on NSE or BSE. For BSE stocks, try the scrip code (e.g. 504132) or SYMBOL.BO.` }); }
 
     const item = await store.addWatch(auth.currentEmail(req), { ticker: sym, note, targetPrice });
     res.status(201).json(await enrich(item));

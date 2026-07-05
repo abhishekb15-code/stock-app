@@ -2,7 +2,8 @@ const express = require('express');
 const router  = express.Router();
 const store   = require('../services/store');
 const auth    = require('../services/authService');
-const { round } = require('../services/indianMarketData');
+const indian = require('../services/indianMarketData');
+const { round } = indian;
 const mds = require('../services/marketDataService');
 
 // Batch-enrich all holdings with ONE price API call instead of 24
@@ -93,8 +94,15 @@ router.post('/', async (req, res) => {
     if (!ticker || !shares || !avgBuyPrice)
       return res.status(400).json({ error: 'ticker, shares, and avgBuyPrice are required' });
 
+    // Resolve to the exchange (NSE/BSE) that has a live quote. If Yahoo is
+    // unreachable, fall back to the normalized symbol so a real holding is
+    // never blocked by a data outage.
+    let resolved;
+    try { resolved = await indian.resolveSymbol(ticker); }
+    catch { resolved = indian.normalizeSymbol(ticker); }
+
     const holding = await store.addHolding(auth.currentEmail(req), {
-      ticker, shares: +shares, avgBuyPrice: +avgBuyPrice,
+      ticker: resolved, shares: +shares, avgBuyPrice: +avgBuyPrice,
       purchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
       notes: notes || '',
     });
