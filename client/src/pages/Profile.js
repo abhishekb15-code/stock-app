@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { UserCircle, Check, Mail, Phone, ShieldCheck, Sparkles, BadgeCheck, Camera, Lock, Bell } from 'lucide-react';
+import { UserCircle, Check, Mail, Phone, ShieldCheck, Sparkles, BadgeCheck, Camera, Lock, Bell, Download, Trash2 } from 'lucide-react';
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
 
@@ -52,6 +52,30 @@ export default function Profile() {
   // change password
   const [cur, setCur] = useState(''); const [nw, setNw] = useState(''); const [conf, setConf] = useState('');
   const [pwMsg, setPwMsg] = useState(''); const [pwErr, setPwErr] = useState(''); const [pwBusy, setPwBusy] = useState(false);
+
+  // data controls (export / delete)
+  const [delBusy, setDelBusy] = useState(false); const [delErr, setDelErr] = useState('');
+
+  const exportData = () => { window.location.href = '/api/profile/export'; };
+
+  const deleteAccount = async () => {
+    setDelErr('');
+    let password;
+    if (p.hasPassword) {
+      password = window.prompt('This permanently deletes your account and all data. Enter your password to confirm:');
+      if (password == null) return;
+    } else if (!window.confirm('This permanently deletes your account and all your data. This cannot be undone. Continue?')) {
+      return;
+    }
+    setDelBusy(true);
+    try {
+      await axios.delete('/api/profile/account', { data: { password } });
+      window.location.href = '/';   // session cleared server-side → back to login
+    } catch (err) {
+      setDelErr(err.response?.data?.error || 'Could not delete your account.');
+      setDelBusy(false);
+    }
+  };
 
   // preferences
   const [digest, setDigest] = useState(false);
@@ -207,6 +231,25 @@ export default function Profile() {
         <Row icon={UserCircle} label="Sign-in method">{p.provider === 'google' ? 'Google' : 'Email & password'}</Row>
         <Row icon={Sparkles} label="Plan">{p.billingEnabled ? (p.plan === 'pro' ? 'Pro' : 'Free') : 'All features'}</Row>
         <Row icon={Check} label="Member since">{fmtDate(p.createdAt)}</Row>
+      </div>
+
+      {/* Privacy & data controls (DPDP rights) */}
+      <div className="card" style={{ padding: 24, marginTop: 18 }}>
+        <SectionTitle icon={ShieldCheck}>Privacy &amp; data</SectionTitle>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Download everything we hold about you (profile, holdings, watchlist, trades).</div>
+          <button className="btn btn-ghost" onClick={exportData} style={{ fontSize: 13 }}><Download size={14} /> Download my data</button>
+        </div>
+        <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            <b style={{ color: 'var(--red)' }}>Delete account.</b> Permanently erases your account and all data. This cannot be undone.
+          </div>
+          <button className="btn btn-danger" onClick={deleteAccount} disabled={delBusy} style={{ fontSize: 13 }}>
+            <Trash2 size={14} /> {delBusy ? 'Deleting…' : 'Delete account'}
+          </button>
+        </div>
+        {delErr && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{delErr}</div>}
       </div>
     </div>
   );

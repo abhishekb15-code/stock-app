@@ -21,9 +21,11 @@ export default function Login({ googleEnabled }) {
   const [error, setError] = useState('');
   const [info, setInfo]   = useState('');
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (mode === 'register' && !agreed) { setError('Please accept the Terms and Privacy Policy to continue.'); return; }
     setError(''); setInfo(''); setLoading(true);
     try {
       if (mode === 'forgot') {
@@ -83,6 +85,12 @@ export default function Login({ googleEnabled }) {
           {mode !== 'forgot' && (
             <input className="input" type="password" placeholder={mode === 'register' ? 'Password (min 8 characters)' : 'Password'} value={password} onChange={e => setPassword(e.target.value)} required
               style={{ width: '100%', boxSizing: 'border-box', marginBottom: 16 }} />
+          )}
+          {mode === 'register' && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, cursor: 'pointer' }}>
+              <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>I agree to the <a href="/terms" target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>Terms</a> and <a href="/privacy" target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>Privacy Policy</a>, and understand this is not investment advice.</span>
+            </label>
           )}
           <button className="btn btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center', marginTop: mode === 'forgot' ? 6 : 0 }}>
             {loading ? 'Please wait…' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Sign in'}

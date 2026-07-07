@@ -174,6 +174,18 @@ const memBackend = {
     return item;
   },
   async deleteWatch(email, id)    { await this.ensureUser(email); const arr = mem.watch.get(email); const i = arr.findIndex(w => w.id === id); if (i === -1) return false; arr.splice(i, 1); return true; },
+
+  // ── Privacy: data export + account deletion ─────────────────────────────────
+  async exportData(email) {
+    const [profile, holdings, watchlist, transactions, sub] = await Promise.all([
+      this.getProfile(email), this.getHoldings(email), this.getWatchlist(email), this.getTransactions(email), this.getSubscription(email),
+    ]);
+    return { profile: { ...profile, plan: sub.plan, planStatus: sub.status }, holdings, watchlist, transactions };
+  },
+  async deleteAccount(email) {
+    mem.users.delete(email); mem.holdings.delete(email); mem.watch.delete(email); mem.txns.delete(email);
+    return true;
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,6 +352,22 @@ const pgBackend = {
     return this._mapW({ ...rows[0], note, target_price: tp });
   },
   async deleteWatch(email, id) { const { rowCount } = await pool.query('DELETE FROM watchlist WHERE id=$1 AND user_email=$2', [id, email]); return rowCount > 0; },
+
+  // ── Privacy: data export + account deletion ─────────────────────────────────
+  async exportData(email) {
+    const [profile, holdings, watchlist, transactions, sub] = await Promise.all([
+      this.getProfile(email), this.getHoldings(email), this.getWatchlist(email), this.getTransactions(email), this.getSubscription(email),
+    ]);
+    return { profile: { ...profile, plan: sub.plan, planStatus: sub.status }, holdings, watchlist, transactions };
+  },
+  async deleteAccount(email) {
+    // transactions/holdings/watchlist first (FK-safe), then the user row.
+    await pool.query('DELETE FROM transactions WHERE user_email=$1', [email]);
+    await pool.query('DELETE FROM holdings     WHERE user_email=$1', [email]);
+    await pool.query('DELETE FROM watchlist    WHERE user_email=$1', [email]);
+    await pool.query('DELETE FROM users        WHERE email=$1',      [email]);
+    return true;
+  },
 };
 
 const backend = USE_PG ? pgBackend : memBackend;

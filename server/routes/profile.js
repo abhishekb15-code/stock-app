@@ -39,9 +39,16 @@ router.put('/', async (req, res) => {
     const profile = await store.updateProfile(email, update);
 
     // Keep the session in sync so the sidebar updates without re-login.
+    // NEVER store a base64 data: URL in the JWT — it would blow past the ~4KB
+    // cookie limit and silently drop the session. Uploaded photos live in the
+    // DB and are loaded by the Profile page from /api/profile instead.
     const sess = auth.currentUser(req);
-    if (sess && (update.name !== undefined || update.picture !== undefined))
-      auth.issueSession(res, { ...sess, name: update.name ?? sess.name, picture: update.picture !== undefined ? update.picture : sess.picture, verified: sess.ver });
+    if (sess && (update.name !== undefined || update.picture !== undefined)) {
+      let nextPic = sess.picture;
+      if (update.picture === null) nextPic = null;
+      else if (typeof update.picture === 'string' && !update.picture.startsWith('data:')) nextPic = update.picture;
+      auth.issueSession(res, { ...sess, name: update.name ?? sess.name, picture: nextPic, verified: sess.ver });
+    }
 
     res.json(profile);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -71,6 +78,31 @@ router.put('/preferences', async (req, res) => {
     const prefs = await store.updatePrefs(email, patch);
     res.json({ prefs });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/profile/export — download all of the user's data (DPDP / GDPR right).
+router.get('/export', async (req, res) => {
+  try {
+    const email = auth.currentEmail(req);
+    const data = await store.exportData(email);
+    res.setHeader('Content-Disposition', 'attachment; filename="stock-intel-data.json"');
+    res.json({ exportedAt: new Date().toISOString(), account: email, ...data });
+  } catch (err) { console.error('Export failed:', err.message); res.status(500).json({ error: 'Could not export your data' }); }
+});
+
+// DELETE /api/profile/account { password? } — permanent account + data deletion.
+router.delete('/account', async (req, res) => {
+  try {
+    const email = auth.currentEmail(req);
+    if (email === store.LOCAL_USER) return res.status(400).json({ error: 'The local account cannot be deleted' });
+    // If the account has a password, require it to confirm the destructive action.
+    const user = await store.getUser(email);
+    if (user && user.passwordHash && !auth.verifyPassword(req.body.password || '', user.passwordHash))
+      return res.status(401).json({ error: 'Password is incorrect' });
+    await store.deleteAccount(email);
+    auth.clearSession(res);
+    res.json({ success: true });
+  } catch (err) { console.error('Account deletion failed:', err.message); res.status(500).json({ error: 'Could not delete your account' }); }
 });
 
 module.exports = router;

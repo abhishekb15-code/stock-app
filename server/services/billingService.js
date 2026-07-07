@@ -89,10 +89,14 @@ function stripeVerify(req) {
   return parts.v1 && crypto.timingSafeEqual(Buffer.from(parts.v1), Buffer.from(expected));
 }
 async function stripeWebhook(req) {
-  if (process.env.STRIPE_WEBHOOK_SECRET && !stripeVerify(req)) throw new Error('bad signature');
+  // Fail closed: never process an unverified webhook. A missing secret would
+  // otherwise let anyone forge a "paid" event and unlock Pro for free.
+  if (!process.env.STRIPE_WEBHOOK_SECRET) throw new Error('STRIPE_WEBHOOK_SECRET not configured');
+  if (!stripeVerify(req)) throw new Error('bad signature');
   const evt = JSON.parse(req.rawBody);
   const obj = evt.data?.object || {};
-  const email = (obj.metadata?.email || obj.customer_email || '').toLowerCase();
+  let email = (obj.metadata?.email || obj.customer_email || '').toLowerCase();
+  if (!email && obj.subscription) email = (await store.findBySubscriptionId(obj.subscription)) || '';
   if (!email) return;
   if (evt.type === 'checkout.session.completed' || evt.type === 'customer.subscription.updated') {
     const active = evt.type === 'checkout.session.completed' || obj.status === 'active' || obj.status === 'trialing';
@@ -121,12 +125,20 @@ function razorpayVerify(req) {
   return sig && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 }
 async function razorpayWebhook(req) {
-  if (process.env.RAZORPAY_WEBHOOK_SECRET && !razorpayVerify(req)) throw new Error('bad signature');
+  // Fail closed: never process an unverified webhook. A missing secret would
+  // otherwise let anyone forge a "charged" event and unlock Pro for free.
+  if (!process.env.RAZORPAY_WEBHOOK_SECRET) throw new Error('RAZORPAY_WEBHOOK_SECRET not configured');
+  if (!razorpayVerify(req)) throw new Error('bad signature');
   const evt = JSON.parse(req.rawBody);
   const sub = evt.payload?.subscription?.entity;
   if (!sub) return;
-  const email = (sub.notes?.email || '').toLowerCase();
+  // Prefer the email we stamped in notes at checkout; fall back to the stored
+  // subscription_id → email mapping if notes are missing on this event.
+  let email = (sub.notes?.email || '').toLowerCase();
+  if (!email && sub.id) email = (await store.findBySubscriptionId(sub.id)) || '';
   if (!email) return;
+  // setSubscription is a last-writer state set, so replayed/duplicate webhooks
+  // (Razorpay retries) are naturally idempotent — same event → same state.
   if (['subscription.charged', 'subscription.activated', 'subscription.resumed'].includes(evt.event)) {
     await store.setSubscription(email, { plan: 'pro', status: 'active', provider: 'razorpay',
       subscriptionId: sub.id, currentPeriodEnd: sub.current_end ? sub.current_end * 1000 : null });

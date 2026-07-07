@@ -14,6 +14,8 @@ import ResetPassword from './pages/ResetPassword';
 import Pricing from './pages/Pricing';
 import Profile from './pages/Profile';
 import Chat from './pages/Chat';
+import Legal from './pages/Legal';
+import Footer from './components/Footer';
 import { AuthContext } from './AuthContext';
 
 axios.defaults.withCredentials = true;   // send the session cookie with API calls
@@ -29,6 +31,10 @@ export default function App() {
 
   // Password-reset page is reachable without being signed in (link from email).
   if (window.location.pathname === '/reset-password') return <ResetPassword />;
+
+  // Legal pages are public (required for app stores, Razorpay, DPDP).
+  const LEGAL = { '/privacy': 'privacy', '/terms': 'terms', '/refund': 'refund', '/contact': 'contact' };
+  if (LEGAL[window.location.pathname]) return <Legal page={LEGAL[window.location.pathname]} />;
 
   if (!auth) {
     return (
@@ -59,7 +65,12 @@ export default function App() {
               <Route path="/investors" element={<SuperInvestors />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/privacy" element={<Legal page="privacy" />} />
+              <Route path="/terms" element={<Legal page="terms" />} />
+              <Route path="/refund" element={<Legal page="refund" />} />
+              <Route path="/contact" element={<Legal page="contact" />} />
             </Routes>
+            <Footer />
           </main>
         </div>
       </BrowserRouter>
