@@ -33,6 +33,13 @@ export default function Pricing() {
     } catch (e) { setError(e.response?.data?.error || 'Could not start checkout.'); setBusy(false); }
   };
 
+  const cancelSub = async () => {
+    if (!window.confirm('Cancel Pro? You keep Pro access until the end of your current billing period, then move to Free.')) return;
+    setBusy(true); setError('');
+    try { await axios.post('/api/billing/cancel'); window.location.reload(); }
+    catch (e) { setError(e.response?.data?.error || 'Could not cancel. Email support and we\'ll sort it out.'); setBusy(false); }
+  };
+
   const isPro = plan === 'pro';
 
   return (
@@ -99,7 +106,14 @@ export default function Pricing() {
             </div>
           ))}
           {isPro ? (
-            <div style={{ marginTop: 18, textAlign: 'center', color: 'var(--green)', fontWeight: 700, fontSize: 14 }}>✓ You’re on Pro</div>
+            <div style={{ marginTop: 18, textAlign: 'center' }}>
+              <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: 14, marginBottom: 10 }}>✓ You’re on Pro</div>
+              {billing?.billingEnabled && (
+                <button className="btn btn-ghost" onClick={cancelSub} disabled={busy} style={{ fontSize: 12.5 }}>
+                  {busy ? 'Working…' : 'Cancel subscription'}
+                </button>
+              )}
+            </div>
           ) : (
             <button className="btn btn-primary" onClick={upgrade} disabled={busy || !billing?.billingEnabled}
               style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}>
