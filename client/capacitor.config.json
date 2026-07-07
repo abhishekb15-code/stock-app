@@ -1,0 +1,19 @@
+{
+  "appId": "com.stockintel.app",
+  "appName": "Stock Intel",
+  "webDir": "build",
+  "server": {
+    "url": "https://stock-intelligence-jttc.onrender.com",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "ios": { "contentInset": "always", "backgroundColor": "#060a10" },
+  "android": { "backgroundColor": "#060a10" },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#060a10",
+      "showSpinner": false
+    }
+  }
+}

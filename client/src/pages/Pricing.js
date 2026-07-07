@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { canPurchaseInApp } from '../native';
 import { Check, Sparkles, Crown } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 
@@ -114,11 +115,16 @@ export default function Pricing() {
                 </button>
               )}
             </div>
-          ) : (
+          ) : canPurchaseInApp() ? (
             <button className="btn btn-primary" onClick={upgrade} disabled={busy || !billing?.billingEnabled}
               style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}>
               <Sparkles size={14} /> {busy ? 'Starting…' : billing?.billingEnabled ? 'Upgrade to Pro' : 'Coming soon'}
             </button>
+          ) : (
+            // Native app (reader-app rule): no in-app purchase. Direct to web.
+            <div style={{ marginTop: 18, textAlign: 'center', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              To upgrade to Pro, visit <b>Stock Intel</b> in your web browser and sign in with this account.
+            </div>
           )}
           {billing && !billing.billingEnabled && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 10 }}>Payments aren’t enabled on this server yet.</div>
