@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.107.0",
+    "@sentry/node": "^10.64.0",
     "axios": "^1.6.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -17,10 +18,10 @@
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
-    "node-cron": "^3.0.3",
-    "nodemailer": "^6.9.7",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
-    "uuid": "^9.0.0",
+    "uuid": "^14.0.1",
     "yahoo-finance2": "^3.15.2"
   },
   "devDependencies": {

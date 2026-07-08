@@ -1,10 +1,22 @@
 require('dotenv').config();
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
+
+const monitoring = require('./services/monitoring');
+const { validateConfig } = require('./config/validate');
+
+// Fail-fast on broken config; init error tracking (both no-op without their env).
+validateConfig();
+monitoring.init();
+
+// Surface crashes to Sentry + logs instead of dying silently.
+process.on('unhandledRejection', (err) => { console.error('UnhandledRejection:', err); monitoring.capture(err, { kind: 'unhandledRejection' }); });
+process.on('uncaughtException',  (err) => { console.error('UncaughtException:', err);  monitoring.capture(err, { kind: 'uncaughtException' }); });
 
 const stockRoutes = require('./routes/stocks');
 const portfolioRoutes = require('./routes/portfolio');
@@ -28,14 +40,36 @@ const hasBuild = fs.existsSync(path.join(CLIENT_BUILD, 'index.html'));
 
 // Middleware
 app.use(helmet({
-  contentSecurityPolicy: false, // allow React app to load fonts, scripts etc.
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      // App is inline-style heavy and CRA inlines a small runtime script.
+      scriptSrc:  ["'self'", "'unsafe-inline'"],
+      styleSrc:   ["'self'", "'unsafe-inline'"],
+      imgSrc:     ["'self'", 'data:', 'https:'],   // profile-photo data URLs + Google avatars
+      connectSrc: ["'self'"],
+      fontSrc:    ["'self'", 'data:'],
+      objectSrc:  ["'none'"],
+      baseUri:    ["'self'"],
+      frameAncestors: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
 }));
+
+// CORS: allow-list in prod (same-origin requests carry no Origin and are always
+// allowed). The web app and the Capacitor shell both load the app's own origin,
+// so cross-origin is only for explicitly listed hosts.
+const allowedOrigins = [process.env.APP_BASE_URL, 'https://stock-intelligence-jttc.onrender.com']
+  .filter(Boolean).map(o => o.replace(/\/$/, ''));
 app.use(cors({
-  origin: IS_PROD || hasBuild
-    ? true                        // same-origin when serving build
-    : 'http://localhost:3000',    // dev: allow CRA dev server
+  credentials: true,
+  origin: (IS_PROD || hasBuild)
+    ? (origin, cb) => cb(null, !origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin.replace(/\/$/, '')))
+    : 'http://localhost:3000',   // dev: CRA dev server
 }));
-app.use(morgan('dev'));
+app.use(morgan(IS_PROD ? 'combined' : 'dev'));
 
 const billing = require('./services/billingService');
 // Payment webhooks need the RAW body for signature verification — mount BEFORE
@@ -46,6 +80,17 @@ app.post('/api/billing/webhook/:provider', express.raw({ type: '*/*' }), async (
 });
 
 app.use(express.json({ limit: '1mb' }));   // 1mb to allow small profile-photo uploads
+
+// Baseline per-IP rate limit across the whole API — caps scraping and runaway
+// data/AI cost. Generous enough for normal use (a page load fires ~8 requests);
+// auth and chat keep their own stricter limits on top of this.
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many requests — please slow down.' },
+  skip: (req) => req.path === '/health',
+}));
 
 // Open routes (no auth): health check + auth endpoints themselves
 app.get('/api/health', (req, res) => {
@@ -110,10 +155,12 @@ if (hasBuild) {
   });
 }
 
-// Error handler
+// Error handler — log full detail server-side + report to Sentry, but never
+// leak internals (stack/DB errors) to the client.
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Internal server error', message: err.message });
+  console.error(err.stack || err);
+  monitoring.capture(err, { path: req.path, method: req.method });
+  res.status(500).json({ error: 'Something went wrong. Please try again.' });
 });
 
 app.listen(PORT, () => {
