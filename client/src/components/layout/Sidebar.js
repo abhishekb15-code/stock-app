@@ -13,7 +13,7 @@ const navItems = [
   { to: '/investors', icon: Crown, label: 'Ace Investors' },
 ];
 
-export default function Sidebar({ user }) {
+export default function Sidebar({ user, isMobile = false, open = false, onClose }) {
   const { plan, billingEnabled } = useAuth();
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
@@ -60,7 +60,10 @@ export default function Sidebar({ user }) {
       borderRight: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column',
       padding: '20px 0',
-      zIndex: 100,
+      zIndex: isMobile ? 250 : 100,
+      transform: isMobile && !open ? 'translateX(-100%)' : 'translateX(0)',
+      transition: 'transform 0.22s ease',
+      boxShadow: isMobile && open ? '2px 0 24px #000a' : 'none',
     }}>
       {/* Logo */}
       <div style={{ padding: '0 20px 24px' }}>

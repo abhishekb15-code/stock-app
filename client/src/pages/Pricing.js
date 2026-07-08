@@ -74,7 +74,7 @@ export default function Pricing() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
         {/* Free */}
         <div className="card" style={{ padding: 28, opacity: isPro ? 0.7 : 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Free</div>

@@ -220,3 +220,11 @@ h2.md-h { font-size: 19px; } h3.md-h { font-size: 16px; } h4.md-h { font-size: 1
 .md-table th { text-align: left; padding: 9px 13px; background: var(--bg-600); color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; white-space: nowrap; }
 .md-table td { padding: 9px 13px; border-top: 1px solid var(--border); color: var(--text-primary); }
 .md-table tr:hover td { background: var(--bg-600); }
+
+/* ── Mobile responsiveness ──────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Wide tables scroll horizontally instead of overflowing the screen. */
+  table.data-table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; max-width: 100%; }
+  /* Keep any stray wide grids from pushing the page sideways. */
+  .fade-in { min-width: 0; }
+}

@@ -6,6 +6,7 @@ import { PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, Legen
 import { useLocked } from '../AuthContext';
 import UpgradeNotice from '../components/UpgradeNotice';
 import PreMarketPanel from '../components/PreMarketPanel';
+import useIsMobile from '../useIsMobile';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7'];
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -35,6 +36,7 @@ export default function Dashboard() {
   const [liveMode, setLiveMode] = useState(true);
   const navigate = useNavigate();
   const locked = useLocked();
+  const isMobile = useIsMobile();
 
   const fetchData = () => {
     setLoading(true);
@@ -87,7 +89,7 @@ export default function Dashboard() {
       <PreMarketPanel />
 
       {/* Summary metrics */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
         <MetricCard label="Total Value" value={money(summary.totalValue)} sub={`${summary.holdingCount} positions`} />
         <MetricCard label="Total P&L" value={signedMoney(summary.totalPnl)}
           sub={`${summary.totalPnlPercent >= 0 ? '+' : ''}${summary.totalPnlPercent}% all time`}
@@ -98,7 +100,7 @@ export default function Dashboard() {
         <MetricCard label="Portfolio Cost" value={money(summary.totalCost)} sub="Total invested" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 320px', gap: 20, marginBottom: 24 }}>
         {/* Holdings table */}
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
