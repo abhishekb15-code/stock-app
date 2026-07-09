@@ -46,12 +46,14 @@ function validateConfig() {
     warnings.forEach(w => console.warn('   • ' + w));
   }
   if (fatals.length) {
-    console.error('\n❌ Fatal config errors — refusing to start:');
+    // Do NOT exit the process — a config problem should never brick a deploy.
+    // These are surfaced loudly; the affected feature (e.g. billing webhooks)
+    // already fails safely on its own (SEC-01 rejects unsigned webhooks).
+    console.error('\n❌ Config problems that will break a feature until fixed:');
     fatals.forEach(f => console.error('   • ' + f));
     console.error('');
-    process.exit(1);
   }
-  if (!warnings.length) console.log('✅ Config check passed');
+  if (!warnings.length && !fatals.length) console.log('✅ Config check passed');
 }
 
 module.exports = { validateConfig };

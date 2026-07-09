@@ -13,6 +13,12 @@ services:
         value: production
       - key: RENDER
         value: true
+      # Skip React sourcemap generation — big memory + time saver so the client
+      # build doesn't OOM on the 512 MB free-tier builder.
+      - key: GENERATE_SOURCEMAP
+        value: false
+      - key: CI
+        value: false
       - key: PORT
         value: 10000
       - key: GMAIL_USER
