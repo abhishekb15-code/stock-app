@@ -4,6 +4,7 @@ const router  = express.Router();
 const auth    = require('../services/authService');
 const chat    = require('../services/aiChat');
 const cap     = require('../services/chatLimiter');
+const store   = require('../services/store');
 
 // AI calls cost money — throttle per IP (burst guard, on top of the daily caps).
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
@@ -15,6 +16,18 @@ router.get('/status', (req, res) => {
     commands:  Object.keys(chat.COMMANDS),
     ...cap.status(auth.currentEmail(req)),
   });
+});
+
+// GET /api/chat/history — the saved conversation (survives refresh, per user).
+router.get('/history', async (req, res) => {
+  try { res.json({ messages: await store.getChatHistory(auth.currentEmail(req)) }); }
+  catch (err) { console.error('Chat history failed:', err.message); res.status(500).json({ error: 'Could not load chat history' }); }
+});
+
+// DELETE /api/chat/history — start a fresh conversation.
+router.delete('/history', async (req, res) => {
+  try { await store.clearChat(auth.currentEmail(req)); res.json({ success: true }); }
+  catch (err) { console.error('Chat clear failed:', err.message); res.status(500).json({ error: 'Could not clear chat' }); }
 });
 
 // POST /api/chat — stream an assistant turn over Server-Sent Events.
@@ -54,12 +67,20 @@ router.post('/', limiter, async (req, res) => {
   let closed = false;
   req.on('close', () => { closed = true; });
 
+  // Persist the user's newest message so the conversation survives refresh.
+  const latest = messages[messages.length - 1];
+  if (latest?.role === 'user' && typeof latest.content === 'string') {
+    store.addChatMessage(email, { role: 'user', content: latest.content })
+      .catch(e => console.warn('Chat save (user) failed:', e.message));
+  }
+
+  let assistantText = '';
   try {
     await chat.runChat({
-      messages,
+      messages: messages.slice(-24),   // cap what we send to the model (token cost)
       command,
       email,
-      onText:     (t) => { if (!closed) send('text', { text: t }); },
+      onText:     (t) => { assistantText += t; if (!closed) send('text', { text: t }); },
       onThinking: (t) => { if (!closed) send('thinking', { text: t }); },
       onTool:     (name) => { if (!closed) send('tool', { name }); },
     });
@@ -68,6 +89,12 @@ router.post('/', limiter, async (req, res) => {
     console.warn('Chat error:', err.message);
     if (!closed) send('error', { error: err.message || 'Assistant failed' });
   } finally {
+    // Persist the assistant's reply (even if the client disconnected mid-stream,
+    // the recommendation is saved and reappears on next load).
+    if (assistantText.trim()) {
+      store.addChatMessage(email, { role: 'assistant', content: assistantText })
+        .catch(e => console.warn('Chat save (assistant) failed:', e.message));
+    }
     if (!closed) res.end();
   }
 });

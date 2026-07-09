@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Sparkles, Send, Bot, User, Square, AlertTriangle } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Square, AlertTriangle, Plus } from 'lucide-react';
 import Markdown from '../components/Markdown';
 
 // Slash commands → backend command id. Typing "/" surfaces this menu.
@@ -47,7 +47,19 @@ export default function Chat() {
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then(d => { setAvailable(!!d.available); setRemaining(d.remaining ?? null); })
       .catch(s => setAvailable(s === 402 ? 'locked' : false));
+    // Restore the saved conversation (survives refresh; per account).
+    fetch('/api/chat/history', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { messages: [] })
+      .then(d => { if (Array.isArray(d.messages) && d.messages.length) setMessages(d.messages.map(m => ({ role: m.role, content: m.content }))); })
+      .catch(() => {});
   }, []);
+
+  const newChat = async () => {
+    if (streaming) return;
+    if (messages.length && !window.confirm('Start a new chat? The current conversation will be cleared.')) return;
+    try { await fetch('/api/chat/history', { method: 'DELETE', credentials: 'include' }); } catch {}
+    setMessages([]); setError('');
+  };
 
   const scrollToEnd = useCallback(() => {
     const el = scrollRef.current;
@@ -175,6 +187,12 @@ export default function Chat() {
           <div style={{ fontWeight: 700, fontSize: 16 }}>Niveshak AI</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Your AI equity research analyst · grounded in live data</div>
         </div>
+        {messages.length > 0 && (
+          <button className="btn btn-ghost" onClick={newChat} disabled={streaming}
+            style={{ marginLeft: 'auto', fontSize: 12 }}>
+            <Plus size={13} /> New chat
+          </button>
+        )}
       </div>
 
       {/* Messages */}

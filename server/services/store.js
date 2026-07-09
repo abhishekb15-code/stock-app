@@ -64,7 +64,7 @@ const USE_PG = !!process.env.DATABASE_URL;
 // ─────────────────────────────────────────────────────────────────────────────
 // In-memory backend
 // ─────────────────────────────────────────────────────────────────────────────
-const mem = { users: new Map(), holdings: new Map(), watch: new Map(), txns: new Map() };  // email -> …
+const mem = { users: new Map(), holdings: new Map(), watch: new Map(), txns: new Map(), chats: new Map() };  // email -> …
 
 const memBackend = {
   async init() {
@@ -177,15 +177,28 @@ const memBackend = {
   },
   async deleteWatch(email, id)    { await this.ensureUser(email); const arr = mem.watch.get(email); const i = arr.findIndex(w => w.id === id); if (i === -1) return false; arr.splice(i, 1); return true; },
 
+  // ── AI chat history (persists the conversation across refreshes) ────────────
+  async getChatHistory(email, limit = 200) {
+    const arr = mem.chats.get(email) || [];
+    return arr.slice(-limit);
+  },
+  async addChatMessage(email, { role, content }) {
+    const arr = mem.chats.get(email) || [];
+    arr.push({ id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() });
+    if (arr.length > 400) arr.splice(0, arr.length - 400);   // cap growth
+    mem.chats.set(email, arr);
+  },
+  async clearChat(email) { mem.chats.delete(email); return true; },
+
   // ── Privacy: data export + account deletion ─────────────────────────────────
   async exportData(email) {
-    const [profile, holdings, watchlist, transactions, sub] = await Promise.all([
-      this.getProfile(email), this.getHoldings(email), this.getWatchlist(email), this.getTransactions(email), this.getSubscription(email),
+    const [profile, holdings, watchlist, transactions, sub, chat] = await Promise.all([
+      this.getProfile(email), this.getHoldings(email), this.getWatchlist(email), this.getTransactions(email), this.getSubscription(email), this.getChatHistory(email),
     ]);
-    return { profile: { ...profile, plan: sub.plan, planStatus: sub.status }, holdings, watchlist, transactions };
+    return { profile: { ...profile, plan: sub.plan, planStatus: sub.status }, holdings, watchlist, transactions, chatHistory: chat };
   },
   async deleteAccount(email) {
-    mem.users.delete(email); mem.holdings.delete(email); mem.watch.delete(email); mem.txns.delete(email);
+    mem.users.delete(email); mem.holdings.delete(email); mem.watch.delete(email); mem.txns.delete(email); mem.chats.delete(email);
     return true;
   },
 };
@@ -227,7 +240,11 @@ const pgBackend = {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end BIGINT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs JSONB DEFAULT '{}'::jsonb;`);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs JSONB DEFAULT '{}'::jsonb;
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id UUID PRIMARY KEY, user_email TEXT NOT NULL, role TEXT NOT NULL,
+        content TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+      CREATE INDEX IF NOT EXISTS chat_user ON chat_messages(user_email, created_at);`);
     await this.ensureUser(LOCAL_USER, { name: 'Local' });
   },
   async ensureUser(email, profile = {}) {
@@ -355,15 +372,31 @@ const pgBackend = {
   },
   async deleteWatch(email, id) { const { rowCount } = await pool.query('DELETE FROM watchlist WHERE id=$1 AND user_email=$2', [id, email]); return rowCount > 0; },
 
+  // ── AI chat history (persists the conversation across refreshes) ────────────
+  async getChatHistory(email, limit = 200) {
+    const { rows } = await pool.query(
+      'SELECT id, role, content, created_at FROM chat_messages WHERE user_email=$1 ORDER BY created_at DESC LIMIT $2', [email, limit]);
+    return rows.reverse().map(r => ({ id: r.id, role: r.role, content: r.content, createdAt: r.created_at }));
+  },
+  async addChatMessage(email, { role, content }) {
+    await pool.query('INSERT INTO chat_messages(id, user_email, role, content) VALUES($1,$2,$3,$4)',
+      [crypto.randomUUID(), email, role, content]);
+    // Cap growth: keep the most recent 400 messages per user.
+    await pool.query(`DELETE FROM chat_messages WHERE user_email=$1 AND id NOT IN
+      (SELECT id FROM chat_messages WHERE user_email=$1 ORDER BY created_at DESC LIMIT 400)`, [email]);
+  },
+  async clearChat(email) { await pool.query('DELETE FROM chat_messages WHERE user_email=$1', [email]); return true; },
+
   // ── Privacy: data export + account deletion ─────────────────────────────────
   async exportData(email) {
-    const [profile, holdings, watchlist, transactions, sub] = await Promise.all([
-      this.getProfile(email), this.getHoldings(email), this.getWatchlist(email), this.getTransactions(email), this.getSubscription(email),
+    const [profile, holdings, watchlist, transactions, sub, chat] = await Promise.all([
+      this.getProfile(email), this.getHoldings(email), this.getWatchlist(email), this.getTransactions(email), this.getSubscription(email), this.getChatHistory(email),
     ]);
-    return { profile: { ...profile, plan: sub.plan, planStatus: sub.status }, holdings, watchlist, transactions };
+    return { profile: { ...profile, plan: sub.plan, planStatus: sub.status }, holdings, watchlist, transactions, chatHistory: chat };
   },
   async deleteAccount(email) {
     // transactions/holdings/watchlist first (FK-safe), then the user row.
+    await pool.query('DELETE FROM chat_messages WHERE user_email=$1', [email]);
     await pool.query('DELETE FROM transactions WHERE user_email=$1', [email]);
     await pool.query('DELETE FROM holdings     WHERE user_email=$1', [email]);
     await pool.query('DELETE FROM watchlist    WHERE user_email=$1', [email]);
