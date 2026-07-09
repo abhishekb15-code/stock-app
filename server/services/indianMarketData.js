@@ -141,7 +141,7 @@ function last(arr) {
 // ── Exported functions ─────────────────────────────────────────────────────────
 
 async function getQuote(input) {
-  const symbol = normalizeSymbol(input);
+  const symbol = await resolveSymbol(input);
   const q = await mds.getQuote(symbol);
   return {
     ticker:        symbol,
@@ -150,7 +150,7 @@ async function getQuote(input) {
     name:          q.name,
     sector:        'Unknown',
     exchange:      q.exchange || 'NSE',
-    currency:      'INR',
+    currency:      q.currency || 'INR',
     price:         q.price,
     previousClose: q.previousClose,
     change:        q.change,
@@ -161,7 +161,7 @@ async function getQuote(input) {
 }
 
 async function getAssetProfile(input) {
-  const symbol = normalizeSymbol(input);
+  const symbol = await resolveSymbol(input);
   try {
     const f = await mds.getFundamentalsData(symbol);
     return {
@@ -176,7 +176,7 @@ async function getAssetProfile(input) {
 }
 
 async function getStockAnalysis(input) {
-  const symbol = normalizeSymbol(input);
+  const symbol = await resolveSymbol(input);
 
   const [quoteResult, ohlcvResult, fundResult] = await Promise.allSettled([
     mds.getQuote(symbol),
@@ -216,7 +216,7 @@ async function getStockAnalysis(input) {
     name:          q.name || fund.name || symbol,
     sector:        fund.sector || 'Unknown',
     exchange:      q.exchange || 'NSE',
-    currency:      'INR',
+    currency:      q.currency || 'INR',
     price:         round(currentPrice),
     change:        q.change,
     changePercent: q.changePercent,
@@ -247,7 +247,7 @@ async function getStockAnalysis(input) {
 }
 
 async function getFundamentals(input) {
-  const symbol = normalizeSymbol(input);
+  const symbol = await resolveSymbol(input);
   const [quoteRes, fundRes] = await Promise.allSettled([
     mds.getQuote(symbol),
     mds.getFundamentalsData(symbol),
@@ -293,7 +293,7 @@ async function getFundamentals(input) {
 }
 
 async function getDevelopments(input) {
-  const symbol  = normalizeSymbol(input);
+  const symbol  = await resolveSymbol(input);
   const [q, profile] = await Promise.allSettled([getQuote(symbol), getAssetProfile(symbol)]);
   const quote   = q.status==='fulfilled' ? q.value : { name:symbol, exchange:'NSE', sector:'Unknown' };
   const prof    = profile.status==='fulfilled' ? profile.value : {};

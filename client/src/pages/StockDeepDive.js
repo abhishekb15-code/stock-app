@@ -9,12 +9,22 @@ import {
 } from 'recharts';
 import { useLocked } from '../AuthContext';
 import UpgradeNotice from '../components/UpgradeNotice';
+import { curSymbol } from '../currency';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-const money  = (v) => v != null ? `₹${Number(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—';
+// This page shows a single stock, so the active currency is module-level and set
+// when its data loads (see fetch). ₹ for NSE/BSE, $ for US, etc.
+let CUR = 'INR';
+const sym    = () => curSymbol(CUR);
+const money  = (v) => v != null ? `${sym()}${Number(v).toLocaleString(CUR === 'INR' ? 'en-IN' : 'en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—';
+const eps    = (v) => v != null ? `${sym()}${v}` : '—';
 const pct    = (v) => v != null ? `${Number(v).toFixed(2)}%` : '—';
 const fmt    = (v) => v != null ? Number(v).toLocaleString('en-IN') : '—';
-const crore  = (v) => v != null ? `₹${(v/1e7).toFixed(1)} Cr` : '—';
+// Big numbers: crore for INR, compact B/M for other currencies.
+const crore  = (v) => v == null ? '—'
+  : CUR === 'INR' ? `₹${(v/1e7).toFixed(1)} Cr`
+  : v >= 1e9 ? `${sym()}${(v/1e9).toFixed(1)}B`
+  : `${sym()}${(v/1e6).toFixed(1)}M`;
 const color  = (v) => v >= 0 ? 'var(--green)' : 'var(--red)';
 
 const TABS = [
@@ -145,7 +155,7 @@ function OverviewTab({ stockData, holding }) {
             <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="date" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} />
-              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} tickFormatter={v=>`₹${v}`} domain={['auto','auto']} />
+              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} tickFormatter={v=>`${sym()}${v}`} domain={['auto','auto']} />
               <Tooltip content={<ChartTooltip />} />
               <Area type="monotone" dataKey="close" name="Price" stroke="#3b82f6" fill="#3b82f633" strokeWidth={2} dot={false} />
               {t?.ema?.ema20 && <Line type="monotone" dataKey="ema20" name="EMA20" stroke="#f59e0b" strokeWidth={1} dot={false} />}
@@ -174,7 +184,7 @@ function OverviewTab({ stockData, holding }) {
           {f ? <>
             <InfoRow label="P/E Ratio" value={f.peRatio||'—'} />
             <InfoRow label="P/B Ratio" value={f.pbRatio||'—'} />
-            <InfoRow label="EPS (TTM)" value={f.eps != null ? `₹${f.eps}`:''||'—'} />
+            <InfoRow label="EPS (TTM)" value={eps(f.eps)} />
             <InfoRow label="ROE" value={pct(f.roe)} color={f.roe>15?'var(--green)':f.roe<8?'var(--red)':undefined} />
             <InfoRow label="Revenue Growth" value={pct(f.revenueGrowth)} color={f.revenueGrowth>0?'var(--green)':'var(--red)'} />
             <InfoRow label="Net Margin" value={pct(f.profitMargin)} color={f.profitMargin>10?'var(--green)':f.profitMargin<3?'var(--red)':undefined} />
@@ -217,7 +227,7 @@ function EarningsTab({ earnings }) {
         <StatCard label="Revenue Growth YoY" value={pct(metrics?.revenueGrowthYoY)} color={metrics?.revenueGrowthYoY>0?'var(--green)':'var(--red)'} />
         <StatCard label="Earnings Growth" value={pct(metrics?.earningsGrowth)} color={metrics?.earningsGrowth>0?'var(--green)':'var(--red)'} />
         <StatCard label="Net Margin" value={pct(metrics?.netMarginTTM)} color={metrics?.netMarginTTM>10?'var(--green)':metrics?.netMarginTTM<3?'var(--red)':undefined} />
-        <StatCard label="Trailing EPS" value={metrics?.trailingEPS != null ? `₹${metrics.trailingEPS}` : '—'} />
+        <StatCard label="Trailing EPS" value={eps(metrics?.trailingEPS)} />
       </div>
 
       {/* Signals */}
@@ -260,7 +270,7 @@ function EarningsTab({ earnings }) {
               { value: s.grossProfit ? crore(s.grossProfit) : '—' },
               { value: s.operatingIncome ? crore(s.operatingIncome) : '—', color: s.operatingIncome>0?'var(--green)':'var(--red)' },
               { value: s.netIncome ? crore(s.netIncome) : '—', color: s.netIncome>0?'var(--green)':'var(--red)' },
-              { value: s.eps != null ? `₹${s.eps}` : '—' },
+              { value: eps(s.eps) },
             ]}))}
           />
         </>
@@ -274,8 +284,8 @@ function EarningsTab({ earnings }) {
             headers={['Quarter','Actual EPS','Estimate EPS','Surprise %']}
             rows={epsHistory.map(h=>({ cells:[
               h.date,
-              { value: h.epsActual != null ? `₹${h.epsActual}` : '—' },
-              { value: h.epsEstimate != null ? `₹${h.epsEstimate}` : '—' },
+              { value: eps(h.epsActual) },
+              { value: eps(h.epsEstimate) },
               { value: h.surprise != null ? `${h.surprise>0?'+':''}${h.surprise.toFixed(1)}%` : '—', color: h.surprise>0?'var(--green)':'var(--red)' },
             ]}))}
           />
@@ -540,6 +550,7 @@ export default function StockDeepDive() {
       axios.get(`/api/stock/${ticker}`),
       axios.get('/api/portfolio'),
     ]).then(([stock, portfolio]) => {
+      CUR = stock.data.currency || 'INR';   // set active currency for the money helpers
       setStockData({ technical: stock.data, fundamental: { fundamentals: stock.data.fundamentals, valuation: stock.data.valuation, sector: stock.data.sector } });
       const h = portfolio.data.holdings?.find(h => h.ticker === ticker || h.ticker.replace('.NS','').replace('.BO','') === ticker.replace('.NS','').replace('.BO',''));
       setHolding(h);
