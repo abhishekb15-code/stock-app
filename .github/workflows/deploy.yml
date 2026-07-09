@@ -1,4 +1,4 @@
-name: 🚀 Deploy to Render
+name: Deploy to Render
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
       - name: Install & build frontend
         run: |
           cd client && npm install && CI=false npm run build
-          echo "✅ Frontend built successfully"
+          echo "Frontend built successfully"
 
       - name: Install server deps & syntax check
         run: |
@@ -30,23 +30,27 @@ jobs:
           node --check index.js
           node --check models/db.js
           node --check services/analysisEngine.js
-          echo "✅ Server syntax OK"
+          echo "Server syntax OK"
 
       - name: Trigger Render deploy
-        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: |
-          RESPONSE=$(curl -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}")
-          echo "Render response: $RESPONSE"
-          echo "✅ Deploy triggered"
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            RESPONSE=$(curl -s -X POST "$RENDER_DEPLOY_HOOK")
+            echo "Render response: $RESPONSE"
+            echo "Deploy hook triggered"
+          else
+            echo "No RENDER_DEPLOY_HOOK secret set - skipping (Render auto-deploys via its own GitHub integration)"
+          fi
 
       - name: Summary
         run: |
-          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-          ## 🚀 Deployed to Render
-
-          | | |
-          |---|---|
-          | **Status** | ✅ Deploy triggered |
-          | **Dashboard** | https://dashboard.render.com |
-          | **Live in** | ~2 minutes |
-          EOF
+          {
+            echo "## Build check complete"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Status** | Build and syntax checks passed |"
+            echo "| **Dashboard** | https://dashboard.render.com |"
+          } >> "$GITHUB_STEP_SUMMARY"
