@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Plus, Trash2, RefreshCw, Star, ArrowUpRight, ArrowDownRight, Target } from 'lucide-react';
 
-const money = (v) => v != null ? `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+import { money as fmtMoney } from '../currency';
+const money = (v, c) => v != null ? fmtMoney(v, c || 'INR') : '—';
 const pct   = (v) => v != null ? `${v >= 0 ? '+' : ''}${Number(v).toFixed(2)}%` : '—';
 
 function VolumeBadge({ sig }) {
@@ -73,11 +74,11 @@ export default function Watchlist() {
       {/* Add form */}
       <form onSubmit={add} className="card" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', padding: 16, marginBottom: 20 }}>
         <div style={{ flex: '1 1 160px' }}>
-          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Ticker (NSE or BSE)</label>
-          <input className="input" placeholder="e.g. DMART, RELIANCE.BO, 504132" value={ticker} onChange={e => setTicker(e.target.value)} />
+          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Ticker (NSE, BSE, or global)</label>
+          <input className="input" placeholder="e.g. DMART, RELIANCE.BO, 504132, AAPL, VOD.L" value={ticker} onChange={e => setTicker(e.target.value)} />
         </div>
         <div style={{ flex: '0 1 130px' }}>
-          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Target price (₹)</label>
+          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Target price</label>
           <input className="input" type="number" placeholder="optional" value={target} onChange={e => setTarget(e.target.value)} />
         </div>
         <div style={{ flex: '1 1 180px' }}>
@@ -113,14 +114,14 @@ export default function Watchlist() {
                     <div style={{ fontWeight: 700 }}>{i.displayTicker}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{i.note || i.name}</div>
                   </td>
-                  <td className="mono">{money(i.price)}</td>
+                  <td className="mono">{money(i.price, i.currency)}</td>
                   <td className={`mono ${i.changePercent >= 0 ? 'pos' : 'neg'}`}>{pct(i.changePercent)}</td>
-                  <td className="mono">{i.targetPrice ? money(i.targetPrice) : '—'}</td>
+                  <td className="mono">{i.targetPrice ? money(i.targetPrice, i.currency) : '—'}</td>
                   <td className="mono" style={{ color: i.toTargetPercent > 0 ? 'var(--green)' : i.toTargetPercent < 0 ? 'var(--red)' : undefined }}>
                     {i.toTargetPercent != null ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Target size={11} />{pct(i.toTargetPercent)}</span> : '—'}
                   </td>
                   <td className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {i.fiftyTwoWeekLow ? `${money(i.fiftyTwoWeekLow)} – ${money(i.fiftyTwoWeekHigh)}` : '—'}
+                    {i.fiftyTwoWeekLow ? `${money(i.fiftyTwoWeekLow, i.currency)} – ${money(i.fiftyTwoWeekHigh, i.currency)}` : '—'}
                   </td>
                   <td><VolumeBadge sig={i.volumeSignal} /></td>
                   <td onClick={e => e.stopPropagation()}>

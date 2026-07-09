@@ -7,10 +7,9 @@ import { useLocked } from '../AuthContext';
 import UpgradeNotice from '../components/UpgradeNotice';
 import PreMarketPanel from '../components/PreMarketPanel';
 import useIsMobile from '../useIsMobile';
+import { money, signedMoney } from '../currency';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7'];
-const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const signedMoney = (v) => `${v >= 0 ? '+' : '-'}${money(Math.abs(v))}`;
 
 function MetricCard({ label, value, sub, color }) {
   return (
@@ -88,17 +87,29 @@ export default function Dashboard() {
       {/* Pre-market / market direction insight */}
       <PreMarketPanel />
 
-      {/* Summary metrics */}
-      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
-        <MetricCard label="Total Value" value={money(summary.totalValue)} sub={`${summary.holdingCount} positions`} />
-        <MetricCard label="Total P&L" value={signedMoney(summary.totalPnl)}
-          sub={`${summary.totalPnlPercent >= 0 ? '+' : ''}${summary.totalPnlPercent}% all time`}
-          color={summary.totalPnl >= 0 ? 'var(--green)' : 'var(--red)'} />
-        <MetricCard label="Today's P&L" value={signedMoney(summary.dailyPnl)}
-          sub={summary.dailyPnlPercent != null ? `${summary.dailyPnlPercent >= 0 ? '+' : ''}${summary.dailyPnlPercent}% today` : 'Market hours'}
-          color={summary.dailyPnl >= 0 ? 'var(--green)' : 'var(--red)'} />
-        <MetricCard label="Portfolio Cost" value={money(summary.totalCost)} sub="Total invested" />
-      </div>
+      {/* Summary metrics — one block per currency (₹/$/… never mixed) */}
+      {(portfolio.summaryByCurrency?.length ? portfolio.summaryByCurrency : [summary]).map((s, i) => {
+        const multi = (portfolio.summaryByCurrency?.length || 0) > 1;
+        return (
+          <div key={s.currency || i} style={{ marginBottom: multi ? 14 : 24 }}>
+            {multi && (
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', margin: '2px 2px 8px', letterSpacing: '0.4px' }}>
+                {s.currency} holdings · {s.holdingCount} position{s.holdingCount !== 1 ? 's' : ''}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, flexWrap: 'wrap' }}>
+              <MetricCard label="Total Value" value={money(s.totalValue, s.currency)} sub={`${s.holdingCount} positions`} />
+              <MetricCard label="Total P&L" value={signedMoney(s.totalPnl, s.currency)}
+                sub={`${s.totalPnlPercent >= 0 ? '+' : ''}${s.totalPnlPercent}% all time`}
+                color={s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)'} />
+              <MetricCard label="Today's P&L" value={signedMoney(s.dailyPnl, s.currency)}
+                sub={s.dailyPnlPercent != null ? `${s.dailyPnlPercent >= 0 ? '+' : ''}${s.dailyPnlPercent}% today` : 'Market hours'}
+                color={s.dailyPnl >= 0 ? 'var(--green)' : 'var(--red)'} />
+              <MetricCard label="Portfolio Cost" value={money(s.totalCost, s.currency)} sub="Total invested" />
+            </div>
+          </div>
+        );
+      })}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 320px', gap: 20, marginBottom: 24 }}>
         {/* Holdings table */}
@@ -121,12 +132,12 @@ export default function Dashboard() {
                         <div style={{ fontWeight: 700 }}>{h.displayTicker || h.ticker}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{h.shares} shares</div>
                       </td>
-                      <td className="mono">{money(h.avgBuyPrice)}</td>
+                      <td className="mono">{money(h.avgBuyPrice, h.currency)}</td>
                       <td className="mono">
-                        {money(h.currentPrice)}
+                        {money(h.currentPrice, h.currency)}
                         {!h.livePrice && <span style={{ fontSize: 9, color: '#f59e0b', marginLeft: 3 }}>est</span>}
                       </td>
-                      <td className={`mono ${h.pnl >= 0 ? 'pos' : 'neg'}`}>{signedMoney(h.pnl)}</td>
+                      <td className={`mono ${h.pnl >= 0 ? 'pos' : 'neg'}`}>{signedMoney(h.pnl, h.currency)}</td>
                       <td className="mono">{h.technical?.rsi?.value?.toFixed(1) || '—'}</td>
                       <td><RecommendationBadge rec={rec} /></td>
                     </tr>

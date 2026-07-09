@@ -277,7 +277,7 @@ async function getQuote(ticker) {
     name: q.name, exchange: q.exchange,
     price: r(q.price), previousClose: r(q.previousClose),
     change: q.change, changePercent: q.changePercent,
-    volume: q.volume,
+    volume: q.volume, currency: q.currency || 'INR',
     fiftyTwoWeekHigh: r(q.fiftyTwoWeekHigh),
     fiftyTwoWeekLow:  r(q.fiftyTwoWeekLow),
   };

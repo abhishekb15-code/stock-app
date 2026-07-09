@@ -44,6 +44,7 @@ async function enrichAllHoldings(rawHoldings) {
       totalCost:          round(totalCost),
       pnl:                round(pnl),
       pnlPercent:         round(pnlPercent),
+      currency:           (q && q.currency) || 'INR',
       sector:             'Equity',
       name:               h.notes || h.ticker.replace('.NS','').replace('.BO',''),
       technical:          null,
@@ -52,34 +53,49 @@ async function enrichAllHoldings(rawHoldings) {
   });
 }
 
+// Totals grouped by currency (₹ and $ holdings are never mixed into one number).
+function summarize(holdings) {
+  const by = {};
+  holdings.forEach(h => {
+    const c = h.currency || 'INR';
+    const b = by[c] || (by[c] = { currency: c, totalValue: 0, totalCost: 0, dailyPnl: 0, holdingCount: 0 });
+    b.totalValue += h.totalValue; b.totalCost += h.totalCost; b.dailyPnl += (h.dailyPnl || 0); b.holdingCount++;
+  });
+  return Object.values(by).map(b => ({
+    currency:        b.currency,
+    totalValue:      round(b.totalValue),
+    totalCost:       round(b.totalCost),
+    totalPnl:        round(b.totalValue - b.totalCost),
+    totalPnlPercent: b.totalCost ? round(((b.totalValue - b.totalCost) / b.totalCost) * 100) : 0,
+    dailyPnl:        round(b.dailyPnl),
+    dailyPnlPercent: (b.totalValue - b.dailyPnl) ? round((b.dailyPnl / (b.totalValue - b.dailyPnl)) * 100) : 0,
+    holdingCount:    b.holdingCount,
+  })).sort((a, b) => b.holdingCount - a.holdingCount);
+}
+
 // GET /api/portfolio
 router.get('/', async (req, res) => {
   try {
     const raw      = await store.getHoldings(auth.currentEmail(req));
     const holdings = await enrichAllHoldings(raw);
 
-    const totalValue = holdings.reduce((s,h) => s + h.totalValue, 0);
-    const totalCost  = holdings.reduce((s,h) => s + h.totalCost,  0);
-    const totalPnl   = totalValue - totalCost;
-    const dailyPnl   = holdings.reduce((s,h) => s + (h.dailyPnl || 0), 0);
+    const summaryByCurrency = summarize(holdings);
+    // Primary = the currency with the most holdings (INR for a typical user);
+    // kept as `summary` for backward compatibility with existing UI.
+    const primary = summaryByCurrency[0] || { currency: 'INR', totalValue: 0, totalCost: 0, totalPnl: 0, totalPnlPercent: 0, dailyPnl: 0, dailyPnlPercent: 0, holdingCount: 0 };
 
+    // Sector split within the primary currency only (mixing currencies is meaningless).
     const sectors = {};
-    holdings.forEach(h => { sectors[h.sector] = (sectors[h.sector]||0) + h.totalValue; });
+    holdings.filter(h => (h.currency || 'INR') === primary.currency)
+      .forEach(h => { sectors[h.sector] = (sectors[h.sector] || 0) + h.totalValue; });
     const sectorAllocation = Object.entries(sectors).map(([sector, value]) => ({
-      sector, value: round(value), percent: totalValue ? round((value/totalValue)*100,1) : 0,
+      sector, value: round(value), percent: primary.totalValue ? round((value / primary.totalValue) * 100, 1) : 0,
     }));
 
     res.json({
       holdings,
-      summary: {
-        totalValue:      round(totalValue),
-        totalCost:       round(totalCost),
-        totalPnl:        round(totalPnl),
-        totalPnlPercent: totalCost ? round((totalPnl/totalCost)*100) : 0,
-        dailyPnl:        round(dailyPnl),
-        dailyPnlPercent: (totalValue - dailyPnl) ? round((dailyPnl/(totalValue - dailyPnl))*100) : 0,
-        holdingCount:    holdings.length,
-      },
+      summary: { ...primary },
+      summaryByCurrency,
       sectorAllocation,
     });
   } catch (err) {

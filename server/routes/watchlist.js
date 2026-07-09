@@ -22,6 +22,7 @@ async function enrich(item) {
     displayTicker: displaySymbol(item.ticker),
     name:          q?.name || item.note || displaySymbol(item.ticker),
     price,
+    currency:      q?.currency || 'INR',
     change:        q?.change ?? null,
     changePercent: q?.changePercent ?? null,
     fiftyTwoWeekHigh: q?.fiftyTwoWeekHigh ?? null,

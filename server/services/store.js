@@ -11,7 +11,7 @@
  */
 
 const crypto = require('crypto');
-const { normalizeSymbol } = require('./indianMarketData');
+const { normalizeSymbol, cleanSymbol } = require('./indianMarketData');
 
 const OWNER_EMAIL = (process.env.OWNER_EMAIL || 'abhishekb15@gmail.com').toLowerCase();
 const LOCAL_USER  = 'local@local';   // used when auth is disabled (single-user/local mode)
@@ -47,7 +47,9 @@ const SEED_HOLDINGS = [
 function normHolding(d) {
   return {
     id:           d.id || crypto.randomUUID(),
-    ticker:       normalizeSymbol(d.ticker || d.symbol),
+    // Store the symbol as-given (single-add routes resolve it first, incl. global
+    // tickers). Bulk import pre-normalizes to an Indian default — see importHoldings.
+    ticker:       cleanSymbol(d.ticker || d.symbol),
     shares:       Number(d.shares || d.quantity || d.qty || 0),
     avgBuyPrice:  Number(d.avgBuyPrice || d.buyPrice || d.averagePrice || d.avg_price || 0),
     purchaseDate: d.purchaseDate || d.date || '2024-01-01',
@@ -151,7 +153,7 @@ const memBackend = {
   async deleteHolding(email, id)  { await this.ensureUser(email); const arr = mem.holdings.get(email); const i = arr.findIndex(h => h.id === id); if (i === -1) return false; arr.splice(i, 1); return true; },
   async importHoldings(email, holdings, mode) {
     await this.ensureUser(email);
-    const norm = holdings.map(normHolding).filter(h => h.shares > 0 && Number.isFinite(h.avgBuyPrice));
+    const norm = holdings.map(h => normHolding({ ...h, ticker: normalizeSymbol(h.ticker || h.symbol) })).filter(h => h.shares > 0 && Number.isFinite(h.avgBuyPrice));
     mem.holdings.set(email, mode === 'append' ? [...mem.holdings.get(email), ...norm] : norm);
     return [...mem.holdings.get(email)];
   },
@@ -159,7 +161,7 @@ const memBackend = {
   async getWatchlist(email)       { await this.ensureUser(email); return [...(mem.watch.get(email) || [])]; },
   async addWatch(email, data) {
     await this.ensureUser(email);
-    const ticker = normalizeSymbol(data.ticker);
+    const ticker = cleanSymbol(data.ticker);
     const arr = mem.watch.get(email);
     const existing = arr.find(w => w.ticker === ticker);
     if (existing) { if (data.note != null) existing.note = data.note; if (data.targetPrice != null) existing.targetPrice = Number(data.targetPrice); return existing; }
@@ -323,7 +325,7 @@ const pgBackend = {
   async deleteHolding(email, id) { const { rowCount } = await pool.query('DELETE FROM holdings WHERE id=$1 AND user_email=$2', [id, email]); return rowCount > 0; },
   async importHoldings(email, holdings, mode) {
     await this.ensureUser(email);
-    const norm = holdings.map(normHolding).filter(h => h.shares > 0 && Number.isFinite(h.avgBuyPrice));
+    const norm = holdings.map(h => normHolding({ ...h, ticker: normalizeSymbol(h.ticker || h.symbol) })).filter(h => h.shares > 0 && Number.isFinite(h.avgBuyPrice));
     if (mode !== 'append') await pool.query('DELETE FROM holdings WHERE user_email=$1', [email]);
     for (const h of norm) await pool.query('INSERT INTO holdings(id,user_email,ticker,shares,avg_buy_price,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)',
       [h.id, email, h.ticker, h.shares, h.avgBuyPrice, h.purchaseDate, h.notes]);

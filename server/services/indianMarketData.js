@@ -17,29 +17,36 @@ function normalizeSymbol(input) {
   return `${symbol}${DEFAULT_EXCHANGE_SUFFIX}`;
 }
 
-// Resolve a user-typed symbol to the exchange that actually has a live quote.
-// - explicit suffix (.NS/.BO) or index (^) → used as-is
-// - numeric BSE scrip code → BSE
-// - plain symbol → try NSE first, then BSE
-// Returns the working Yahoo symbol, or throws if neither exchange has it.
-async function resolveSymbol(input) {
+// Trim/upper a symbol WITHOUT forcing an exchange suffix. Used to store a
+// symbol that has already been resolved (so a bare US ticker like AAPL is
+// stored as-is instead of being turned into AAPL.NS).
+function cleanSymbol(input) {
   if (!input || typeof input !== 'string') throw new Error('A stock symbol is required');
-  const raw = input.trim().toUpperCase().replace(/\s+/g, '');
-  if (!raw) throw new Error('A stock symbol is required');
+  const s = input.trim().toUpperCase().replace(/\s+/g, '');
+  if (!s) throw new Error('A stock symbol is required');
+  return s;
+}
+
+// Resolve a user-typed symbol to the market that actually has a live quote.
+// - explicit suffix (.NS/.BO/.L/.DE/…) or index (^) → used as-is
+// - numeric BSE scrip code → BSE
+// - plain symbol → try NSE, then BSE, then bare (US / global)
+// Returns the working Yahoo symbol, or throws if none has it.
+async function resolveSymbol(input) {
+  const raw = cleanSymbol(input);
 
   let candidates;
-  if (raw.startsWith('^') || raw.endsWith('.NS') || raw.endsWith('.BO')) candidates = [raw];
-  else if (/^\d+$/.test(raw)) candidates = [`${raw}.BO`, `${raw}.NS`];   // numeric → BSE first
-  else candidates = [`${raw}${DEFAULT_EXCHANGE_SUFFIX}`, `${raw}.BO`];   // plain → NSE, then BSE
+  if (raw.startsWith('^') || raw.includes('.')) candidates = [raw];        // already exchange-qualified
+  else if (/^\d+$/.test(raw)) candidates = [`${raw}.BO`, `${raw}.NS`];     // numeric → BSE
+  else candidates = [`${raw}.NS`, `${raw}.BO`, raw];                       // Indian first, then US/global bare
 
-  let lastErr;
   for (const sym of candidates) {
     try {
       const q = await mds.getQuote(sym);
       if (q && Number.isFinite(q.price) && q.price > 0) return sym;
-    } catch (e) { lastErr = e; }
+    } catch { /* try next */ }
   }
-  throw new Error(`No quote found for ${raw} on NSE or BSE`);
+  throw new Error(`No quote found for ${raw} on NSE, BSE, or global markets`);
 }
 
 function displaySymbol(symbol) {
@@ -363,7 +370,7 @@ function generateRecommendation(ticker, technical, fundamentals) {
 }
 
 module.exports = {
-  normalizeSymbol, resolveSymbol, displaySymbol, round, compactCurrency,
+  normalizeSymbol, resolveSymbol, cleanSymbol, displaySymbol, round, compactCurrency,
   getQuote, getAssetProfile, getStockAnalysis, getFundamentals,
   getDevelopments, getPortfolioHoldings, getWhaleSignals, generateRecommendation,
 };
