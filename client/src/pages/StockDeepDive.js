@@ -584,7 +584,9 @@ export default function StockDeepDive() {
       setLoad('sector', true);
       const sec = stockData?.fundamental?.sector || stockData?.technical?.sector;
       if (sec) {
-        try { setSectorData((await axios.get(`/api/analysis/sector/${encodeURIComponent(sec)}`)).data); }
+        // Non-INR stock → show that market's reference peers, not Indian ones.
+        const market = (stockData?.technical?.currency || 'INR') === 'INR' ? 'india' : 'global';
+        try { setSectorData((await axios.get(`/api/analysis/sector/${encodeURIComponent(sec)}?market=${market}`)).data); }
         catch { setSectorData(null); }
       }
       setLoad('sector', false);

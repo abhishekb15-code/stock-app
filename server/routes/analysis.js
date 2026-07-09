@@ -51,7 +51,7 @@ router.get('/competitive/:ticker', async (req, res) => {
 // GET /api/analysis/sector/:sector
 router.get('/sector/:sector', async (req, res) => {
   try {
-    res.json(await sectorOverview(decodeURIComponent(req.params.sector)));
+    res.json(await sectorOverview(decodeURIComponent(req.params.sector), req.query.market === 'global' ? 'global' : 'india'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -4,7 +4,16 @@
  */
 
 const mds = require('./marketDataService');
-const { getStockAnalysis, getFundamentals, normalizeSymbol, round } = require('./indianMarketData');
+const { getStockAnalysis, getFundamentals, normalizeSymbol, resolveSymbol, round } = require('./indianMarketData');
+
+// Resolve a user/URL ticker to the market that has a live quote (NSE→BSE→global).
+// Falls back to the Indian default if nothing resolves, so downstream modules
+// degrade to their normal "unavailable" state instead of throwing.
+async function toSymbol(ticker) {
+  try { return await resolveSymbol(ticker); }
+  catch { return normalizeSymbol(ticker); }
+}
+const isIndian = (sym) => sym.endsWith('.NS') || sym.endsWith('.BO');
 
 const SECTOR_PEERS = {
   'Energy':             ['RELIANCE.NS','ONGC.NS','BPCL.NS','IOC.NS'],
@@ -20,11 +29,33 @@ const SECTOR_PEERS = {
   'Communication Services':['BHARTIARTL.NS'],
 };
 
+// Reference peers for global (US-listed) stocks — used when the analyzed symbol
+// is not NSE/BSE so a US stock is benchmarked against US peers, not Indian ones.
+const US_SECTOR_PEERS = {
+  'Energy':                 ['XOM','CVX','COP','SLB'],
+  'Basic Materials':        ['LIN','SHW','FCX','NEM'],
+  'Industrials':            ['CAT','HON','GE','BA'],
+  'Consumer Cyclical':      ['AMZN','TSLA','HD','NKE'],
+  'Consumer Defensive':     ['PG','KO','PEP','WMT'],
+  'Healthcare':             ['JNJ','UNH','LLY','PFE'],
+  'Financial Services':     ['JPM','BAC','V','GS'],
+  'Technology':             ['AAPL','MSFT','NVDA','GOOGL','META'],
+  'Utilities':              ['NEE','DUK','SO'],
+  'Real Estate':            ['PLD','AMT','SPG'],
+  'Communication Services': ['GOOGL','META','NFLX','DIS'],
+};
+
+// Peer set for a symbol: Indian peers for .NS/.BO, US peers otherwise.
+function peersFor(sym, sector) {
+  const map = isIndian(sym) ? SECTOR_PEERS : US_SECTOR_PEERS;
+  return map[sector] || [];
+}
+
 const crore = (v) => v && Number.isFinite(v) ? `₹${(v/1e7).toFixed(1)} Cr` : '—';
 
 // ── Module 1: Earnings Analysis ────────────────────────────────────────────────
 async function earningsAnalysis(ticker) {
-  const sym     = normalizeSymbol(ticker);
+  const sym     = await toSymbol(ticker);
   const display = sym.replace('.NS','').replace('.BO','');
   let result    = { ticker:sym, displayTicker:display, module:'earnings_analysis', dataQuality:'unavailable' };
 
@@ -111,7 +142,7 @@ async function earningsAnalysis(ticker) {
 
 // ── Module 2: Financial Statements ─────────────────────────────────────────────
 async function financialStatements(ticker) {
-  const sym     = normalizeSymbol(ticker);
+  const sym     = await toSymbol(ticker);
   const display = sym.replace('.NS','').replace('.BO','');
   let result    = { ticker:sym, displayTicker:display, module:'financial_statements', dataQuality:'unavailable' };
 
@@ -156,9 +187,10 @@ async function financialStatements(ticker) {
 }
 
 // ── Module 3: Sector Overview ──────────────────────────────────────────────────
-async function sectorOverview(sector) {
-  const peers  = SECTOR_PEERS[sector] || [];
-  const result = { sector, module:'sector_overview', peers:[] };
+// market: 'india' (default) or 'global' — picks which reference peer set to show.
+async function sectorOverview(sector, market = 'india') {
+  const peers  = (market === 'global' ? US_SECTOR_PEERS : SECTOR_PEERS)[sector] || [];
+  const result = { sector, market, module:'sector_overview', peers:[] };
 
   try {
     const prices = await mds.getBatchPrices(peers);
@@ -195,10 +227,11 @@ async function sectorOverview(sector) {
 
 // ── Module 4: Competitive Analysis ─────────────────────────────────────────────
 async function competitiveAnalysis(ticker) {
-  const sym    = normalizeSymbol(ticker);
+  const sym    = await toSymbol(ticker);
   const fund   = await getFundamentals(sym).catch(()=>null);
   const sector = fund?.sector || 'Technology';
-  const peers  = (SECTOR_PEERS[sector]||[]).filter(p=>p!==sym).slice(0,4);
+  // Benchmark against peers from the stock's own market (US stock → US peers).
+  const peers  = peersFor(sym, sector).filter(p=>p!==sym).slice(0,4);
 
   const allFunds = await Promise.allSettled(
     [sym, ...peers].map(t => getFundamentals(t))
@@ -255,7 +288,7 @@ async function competitiveAnalysis(ticker) {
 
 // ── Module 5: Full single-stock ────────────────────────────────────────────────
 async function fullStockAnalysis(ticker) {
-  const sym = normalizeSymbol(ticker);
+  const sym = await toSymbol(ticker);
   const [technical, fundamental, earnings, statements] = await Promise.allSettled([
     getStockAnalysis(sym),
     getFundamentals(sym),
