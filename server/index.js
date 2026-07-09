@@ -10,13 +10,23 @@ const fs = require('fs');
 const monitoring = require('./services/monitoring');
 const { validateConfig } = require('./config/validate');
 
-// Fail-fast on broken config; init error tracking (both no-op without their env).
-validateConfig();
-monitoring.init();
+// Config check + error tracking. Wrapped so they can NEVER prevent the server
+// from starting — a startup hiccup here must not stop us binding the port
+// (Render fails the deploy with "no open ports detected" if we never listen).
+try { validateConfig(); } catch (e) { console.error('Config check error:', e.message); }
+try { monitoring.init();  } catch (e) { console.error('Monitoring init error:', e.message); }
 
-// Surface crashes to Sentry + logs instead of dying silently.
+let listening = false;   // becomes true once the HTTP server is bound
+
+// Runtime errors: log + report, keep serving. But if something throws DURING
+// startup (before we bind the port), exit loudly so the real error shows in the
+// logs instead of a silent "no open ports" timeout.
 process.on('unhandledRejection', (err) => { console.error('UnhandledRejection:', err); monitoring.capture(err, { kind: 'unhandledRejection' }); });
-process.on('uncaughtException',  (err) => { console.error('UncaughtException:', err);  monitoring.capture(err, { kind: 'uncaughtException' }); });
+process.on('uncaughtException',  (err) => {
+  console.error('UncaughtException:', err);
+  monitoring.capture(err, { kind: 'uncaughtException' });
+  if (!listening) process.exit(1);   // startup failure → crash with a clear stack
+});
 
 const stockRoutes = require('./routes/stocks');
 const portfolioRoutes = require('./routes/portfolio');
@@ -164,6 +174,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
+  listening = true;
   console.log(`\n🚀 Stock Intelligence Server running on http://localhost:${PORT}`);
   console.log('📊 Mode: 🟢 LIVE NSE DATA via yahoo-finance2');
   if (hasBuild) {
